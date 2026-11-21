@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kreds</title>
+  <!-- GitHub Pages serves this for every path it doesn't know, so it is also the page behind the links Kreds
+       makes: /forbind/<token> (an invitation) and /sted/<id> (a place's QR code). With Kreds installed the phone
+       opens the app instead (universal link, .well-known/apple-app-site-association); this page is for everyone
+       else, and offers kreds:// for a build without the universal link. -->
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .open { display: inline-block; background: var(--accent); color: #fff; text-decoration: none; font-weight: 500;
+      padding: 13px 26px; border-radius: 999px; margin: 8px 0 28px; }
+    .open.get { margin: 4px 0 14px; }
+    .hidden { display: none; }
+    /* A place's page: its own face first, then what it is up for next, then why follow. */
+    .place-head { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+    .logo { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; flex: none; background: var(--card);
+      box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 6px 20px rgba(0,0,0,.06); }
+    .logo.initial { display: flex; align-items: center; justify-content: center; background: var(--accent); color: #fff;
+      font: 400 32px/1 'Fraunces', Georgia, serif; }
+    .place-head h1 { margin: 0; }
+    .where { color: var(--text-2); font-size: 15px; margin: -6px 0 28px; }
+    .where a { color: var(--text-2); }
+    .next { background: var(--card); border-radius: 22px; padding: 20px 22px; margin: 0 0 26px;
+      box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 10px 30px rgba(0,0,0,.06); }
+    .next .when { color: var(--accent); font-size: 14px; font-weight: 500; margin: 0 0 4px; }
+    .next .what { font: 400 26px/1.25 'Fraunces', Georgia, serif; margin: 0; }
+    .why { list-style: none; padding: 0; margin: 4px 0 8px; }
+    .why li { position: relative; padding-left: 22px; margin: 0 0 10px; }
+    .why li::before { content: ''; position: absolute; left: 2px; top: 0.62em; width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent); }
+    /* The cover and the place's photos in one row to swipe through, each snapping into place. */
+    .photos { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 -20px 22px; padding: 0 20px;
+      scrollbar-width: none; }
+    .photos::-webkit-scrollbar { display: none; }
+    .photos img { flex: none; width: 86%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 22px; scroll-snap-align: center; }
+    .photos img:only-child { width: 100%; }
+    .photos.hidden { display: none; }
+    .about { margin: -4px 0 14px; white-space: pre-line; }
+    /* The invitation's code: big enough to read and type, with a copy button beside it. */
+    .code { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--card); border-radius: 18px;
+      padding: 14px 18px; margin: 0 0 12px; box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 6px 20px rgba(0,0,0,.05); }
+    .code b { font: 500 18px/1.3 ui-monospace, Menlo, monospace; letter-spacing: 1px; word-break: break-all; flex: 1; min-width: 0; }
+    .code button { font: inherit; font-size: 15px; font-weight: 500; color: var(--accent); background: none; border: 1px solid currentColor;
+      border-radius: 999px; padding: 7px 14px; cursor: pointer; }
+    .steps { padding-left: 20px; margin: 4px 0 20px; }
+    .steps li { margin: 0 0 6px; }
+    .open.wide { display: block; text-align: center; font-size: 18px; padding: 16px 26px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header><a class="mark" href="/">kreds<span>.</span></a></header>
+
+    <section id="invite" class="hidden">
+      <h1>Du er inviteret til Kreds.</h1>
+      <p class="lead">Har du Kreds på din iPhone, så tryk her, og I er forbundet.</p>
+      <a class="open" id="invite-open" href="#">Åbn i Kreds</a>
+      <!-- Without Kreds: the link can't follow you through the App Store, so "Hent Kreds" copies it on the way, and
+           the login screen has a paste button for it (app/login.tsx), before the mail code replaces it. The code below is the fallback. -->
+      <h2>Har du ikke Kreds endnu?</h2>
+      <a class="open get" id="get-app" href="https://apps.apple.com/dk/app/id6834604253">Hent Kreds</a>
+      <p>Invitationen bliver kopieret, når du trykker. Åbn Kreds, og tryk på <b>Indsæt</b>, før du logger ind. Så er I forbundet, når du er logget ind.</p>
+      <p class="quiet">Virker det ikke, så er koden her:</p>
+      <div class="code"><b id="invite-code"></b><button type="button" id="copy-code">Kopier</button></div>
+      <p class="quiet">Linket og koden virker i tre dage, også for flere venner.</p>
+    </section>
+
+    <section id="place" class="hidden">
+      <!-- Filled in from place_card() (0034) when the place is known; otherwise the plain words below stay. -->
+      <div id="place-card" class="hidden">
+        <div class="photos hidden" id="place-photos"></div>
+        <div class="place-head">
+          <div id="place-logo"></div>
+          <h1 id="place-name"></h1>
+        </div>
+        <p class="lead" id="place-line"></p>
+        <p class="about hidden" id="place-about"></p>
+        <p class="where" id="place-where"></p>
+        <div class="next hidden" id="place-next">
+          <p class="when" id="place-when"></p>
+          <p class="what" id="place-what"></p>
+        </div>
+        <ul class="why">
+          <li id="why-see"></li>
+          <li>Sig &ldquo;Jeg er med&rdquo; med ét tryk.</li>
+        </ul>
+      </div>
+      <div id="place-plain">
+        <h1>Følg stedet på Kreds.</h1>
+        <p class="lead">Så ser du, hvad stedet er klar på, og kan sige &ldquo;Jeg er med&rdquo;.</p>
+      </div>
+      <a class="open" id="place-open" href="#">Åbn i Kreds</a>
+    </section>
+
+    <section id="missing">
+      <h1>Siden findes ikke.</h1>
+      <p class="lead"><a href="/">Til forsiden</a></p>
+    </section>
+
+    <p id="no-app" class="quiet hidden">Har du ikke Kreds? <a href="https://apps.apple.com/dk/app/id6834604253">Hent Kreds i App Store</a>.</p>
+  </main>
+  <footer>
+    <a href="/">Kreds</a><a href="/support/">Support</a><a href="/privatliv/">Privatliv</a>
+  </footer>
+  <script>
+    (function () {
+      var m = location.pathname.match(/^\/(forbind|sted)\/([A-Za-z0-9-]{1,64})\/?$/);
+      if (!m) return;
+      var kind = m[1] === 'forbind' ? 'invite' : 'place';
+      document.getElementById('missing').classList.add('hidden');
+      document.getElementById(kind).classList.remove('hidden');
+      if (kind === 'place') document.getElementById('no-app').classList.remove('hidden');
+      if (kind === 'invite') showCode(m[2]);
+      document.getElementById(kind + '-open').href = 'kreds://' + m[1] + '/' + m[2];
+      document.title = kind === 'invite' ? 'Invitation · Kreds' : 'Følg stedet · Kreds';
+      if (kind === 'place') showPlace(m[2]);
+    })();
+
+    // The invitation's code, to copy, and "Hent Kreds", which copies the whole link before it goes to the App Store,
+    // so Kreds can take it from the clipboard after login.
+    function copy(text) {
+      try {
+        var t = document.createElement('textarea');
+        t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
+        document.body.appendChild(t); t.select(); t.setSelectionRange(0, text.length);
+        var ok = document.execCommand('copy'); document.body.removeChild(t);
+        if (ok) return Promise.resolve();
+      } catch (e) {}
+      return navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject();
+    }
+    function showCode(code) {
+      var $ = function (x) { return document.getElementById(x); };
+      $('invite-code').textContent = code;
+      $('copy-code').addEventListener('click', function () {
+        copy(code).then(function () {
+          $('copy-code').textContent = 'Kopieret';
+          setTimeout(function () { $('copy-code').textContent = 'Kopier'; }, 1800);
+        }, function () {});
+      });
+      $('get-app').addEventListener('click', function (e) {
+        e.preventDefault();
+        var go = function () { location.href = $('get-app').href; };
+        copy('https://dinkreds.dk/forbind/' + code).then(go, go);
+      });
+    }
+    // The place's own card. Public keys only (as on /admin); ?db=dev reads kreds-dev, for testing.
+    function showPlace(id) {
+      var dev = /[?&]db=dev\b/.test(location.search);
+      var db = dev
+        ? { url: 'https://fjevnepdomxyaxhqwadk.supabase.co', key: 'sb_publishable_mfnY3wVHqB4h8CWqyuUhUg_KLTFZb9J' }
+        : { url: 'https://pwlozuebxpeztsknzwro.supabase.co', key: 'sb_publishable_0p7rD57QGNgYvp0zWsM2AQ_ScCx9JBz' };
+      if (!/^[0-9a-f-]{36}$/i.test(id)) return;
+      fetch(db.url + '/rest/v1/rpc/place_card', {
+        method: 'POST',
+        headers: { apikey: db.key, Authorization: 'Bearer ' + db.key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_place: id })
+      }).then(function (r) { return r.ok ? r.json() : []; }).then(function (rows) {
+        var p = rows && rows[0];
+        if (!p) return;
+        var $ = function (x) { return document.getElementById(x); };
+        $('place-name').textContent = p.name;
+        document.title = p.name + ' · Kreds';
+        var logo = $('place-logo');
+        if (p.logo_path) {
+          var img = document.createElement('img');
+          img.className = 'logo'; img.alt = '';
+          img.src = db.url + '/storage/v1/object/public/place-logos/' + p.logo_path.split('/').map(encodeURIComponent).join('/');
+          logo.appendChild(img);
+        } else {
+          logo.className = 'logo initial';
+          logo.textContent = p.name.trim().charAt(0).toUpperCase();
+        }
+        if (p.tagline) $('place-line').textContent = p.tagline; else $('place-line').classList.add('hidden');
+        var pub = function (path) { return db.url + '/storage/v1/object/public/place-logos/' + path.split('/').map(encodeURIComponent).join('/'); };
+        var shots = (p.cover_path ? [p.cover_path] : []).concat(p.photo_paths || []);
+        shots.forEach(function (path) {
+          var im = document.createElement('img');
+          im.src = pub(path); im.alt = ''; im.loading = 'lazy';
+          $('place-photos').appendChild(im);
+        });
+        if (shots.length) $('place-photos').classList.remove('hidden');
+        if (p.about) { $('place-about').textContent = p.about; $('place-about').classList.remove('hidden'); }
+        var where = $('place-where');
+        var kinds = { cafe: 'Café', bar: 'Bar', restaurant: 'Restaurant', club: 'Klub/forening', training: 'Træning', culture: 'Kultur', shop: 'Butik' };
+        var facts = [kinds[p.kind], p.city].filter(Boolean).join(' · ');
+        if (facts) where.appendChild(document.createTextNode(facts));
+        if (p.website && /^https?:\/\//.test(p.website)) {
+          if (facts) where.appendChild(document.createTextNode(' · '));
+          var a = document.createElement('a');
+          a.href = p.website; a.rel = 'noopener'; a.textContent = p.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
+          where.appendChild(a);
+        }
+        if (p.instagram && /^[A-Za-z0-9._]{1,30}$/.test(p.instagram)) {
+          if (where.childNodes.length) where.appendChild(document.createTextNode(' · '));
+          var ig = document.createElement('a');
+          ig.href = 'https://instagram.com/' + p.instagram; ig.rel = 'noopener'; ig.textContent = '@' + p.instagram;
+          where.appendChild(ig);
+        }
+        if (p.next_text) {
+          $('place-when').textContent = whenText(new Date(p.next_starts_at), new Date(p.next_ends_at));
+          $('place-what').textContent = p.next_text;
+          $('place-next').classList.remove('hidden');
+        }
+        $('why-see').textContent = 'Se, hvad ' + p.name + ' er klar på, når det sker.';
+        $('place-open').textContent = 'Følg ' + p.name + ' i Kreds';
+        $('place-open').classList.add('wide');
+        $('place-plain').classList.add('hidden');
+        $('place-card').classList.remove('hidden');
+      }).catch(function () {});
+    }
+
+    // "Lige nu, til 18.00", "I dag kl. 17.00", "I morgen kl. 9.30", "Torsdag kl. 17.00": Danish time, as in the app.
+    function whenText(start, end) {
+      var tz = 'Europe/Copenhagen';
+      var clock = function (d) { return d.toLocaleTimeString('da-DK', { hour: 'numeric', minute: '2-digit', timeZone: tz }); };
+      var day = function (d) { return d.toLocaleDateString('sv-SE', { timeZone: tz }); };
+      var now = new Date();
+      if (start <= now) return 'Lige nu, til ' + clock(end);
+      var tomorrow = new Date(now.getTime() + 86400000);
+      var label = day(start) === day(now) ? 'I dag'
+        : day(start) === day(tomorrow) ? 'I morgen'
+        : start.toLocaleDateString('da-DK', { weekday: 'long', timeZone: tz });
+      return label.charAt(0).toUpperCase() + label.slice(1) + ' kl. ' + clock(start);
+    }
+  </script>
+</body>
+</html>

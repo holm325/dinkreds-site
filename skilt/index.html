@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Skilt til disken · Kreds</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    /* The sign for a place's counter: its name, its QR code (https://dinkreds.dk/sted/<id>), and what scanning does.
+       Opened from the QR tab in the app (?id=<place id>&navn=<name>). Always light: it is for paper. The QR code is
+       drawn here with qrcode-generator (MIT, Kazuhiko Arase), the same library the app uses. */
+    :root { --text: #1B1A19; --text-2: #736E69; --bg: #F8F6F2; --line: #E8E4DD; --accent: #E4572E; color-scheme: light; }
+    body { background: #E9E5DE; }
+    .bar { max-width: 760px; margin: 0 auto; padding: 24px 20px 8px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+    .bar p { margin: 0; font-size: 15px; color: var(--text-2); }
+    .controls { display: flex; gap: 8px; align-items: center; }
+    .controls button { font: inherit; font-size: 15px; border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 999px; padding: 8px 14px; cursor: pointer; }
+    .controls button.on { background: var(--text); color: #fff; border-color: var(--text); }
+    .controls button.print { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 500; padding: 8px 18px; }
+
+    .stage { padding: 12px 20px 48px; display: flex; justify-content: center; }
+    .sheet {
+      width: 148mm; height: 210mm; background: #fff; box-shadow: 0 10px 40px rgba(40, 28, 18, .14);
+      display: flex; flex-direction: column; align-items: center; text-align: center; padding: 14mm 12mm 11mm;
+      box-sizing: border-box; overflow: hidden;
+    }
+    .a4 .sheet { width: 210mm; height: 297mm; padding: 20mm 18mm 16mm; }
+    .sheet .mark { font-size: 9mm; }
+    .a4 .sheet .mark { font-size: 12mm; }
+    .sheet .follow { font: 500 4.2mm/1.3 'DM Sans', sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); margin-top: 9mm; }
+    .sheet .name { font: 400 13mm/1.08 'Fraunces', Georgia, serif; letter-spacing: -.01em; margin-top: 3mm; max-width: 100%; overflow-wrap: anywhere; }
+    .a4 .sheet .follow { font-size: 6mm; margin-top: 13mm; }
+    .a4 .sheet .name { font-size: 18mm; }
+    .sheet .qr { width: 86mm; height: 86mm; margin-top: 8mm; }
+    .a4 .sheet .qr { width: 122mm; height: 122mm; margin-top: 11mm; }
+    .sheet .qr svg { width: 100%; height: 100%; display: block; }
+    .sheet .how { font: 400 4.4mm/1.45 'DM Sans', sans-serif; color: var(--text); margin-top: 6mm; max-width: 112mm; }
+    .sheet .how span { color: var(--text-2); }
+    .a4 .sheet .how { font-size: 6.2mm; max-width: 160mm; margin-top: 9mm; }
+    .sheet .foot { margin-top: auto; font: 400 3.6mm/1 'DM Sans', sans-serif; color: var(--text-2); }
+    .a4 .sheet .foot { font-size: 5mm; }
+    .missing { max-width: 520px; margin: 80px auto; padding: 0 20px; }
+
+    @media print {
+      body { background: #fff; }
+      .bar { display: none; }
+      .stage { padding: 0; }
+      .sheet { box-shadow: none; }
+    }
+    @media screen and (max-width: 640px) {
+      /* On a phone: the sheet scaled to fit; printing still uses the real size. */
+      .stage { zoom: .58; }
+      .a4 .stage { zoom: .41; }
+    }
+  </style>
+  <style id="page">@page { size: A5; margin: 0; }</style>
+</head>
+<body>
+  <div id="app">
+    <div class="bar">
+      <p>Skilt til disken. Print det, og sæt det, hvor gæsterne ser det.</p>
+      <div class="controls">
+        <button id="sA5" class="on" type="button">A5</button>
+        <button id="sA4" type="button">A4</button>
+        <button class="print" type="button" onclick="print()">Print</button>
+      </div>
+    </div>
+    <div class="stage">
+      <div class="sheet">
+        <div class="mark">kreds<span>.</span></div>
+        <div class="follow">Følg os i Kreds</div>
+        <div class="name" id="name"></div>
+        <div class="qr" id="qr" role="img" aria-label="QR-kode"></div>
+        <p class="how">Scan med telefonens kamera, og følg os.<br>
+          <span>Har du sagt &ldquo;Jeg er med&rdquo;? Scan igen, når du kommer, så er du tjekket ind.</span></p>
+        <div class="foot">dinkreds.dk</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="qrcode.js"></script>
+  <script>
+  const params = new URLSearchParams(location.search);
+  const id = (params.get('id') || '').toLowerCase();
+  const name = (params.get('navn') || '').trim();
+  if (!/^[0-9a-f-]{36}$/.test(id)) {
+    document.getElementById('app').innerHTML = '<main class="missing"><a class="mark" href="../">kreds<span>.</span></a>' +
+      '<h1 style="margin-top:48px">Skilt til disken</h1><p class="lead">Åbn siden fra QR-fanen i Kreds, så kommer jeres skilt frem her.</p></main>';
+  } else {
+    document.getElementById('name').textContent = name || 'Følg os';
+    if (!name) document.querySelector('.follow').style.display = 'none';
+    // The same link as the QR tab in the app: the app opens it, or the web page says what Kreds is.
+    const qr = qrcode(0, 'M');
+    qr.addData('https://dinkreds.dk/sted/' + id);
+    qr.make();
+    const n = qr.getModuleCount(), q = 2, side = n + q * 2;
+    let d = '';
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + q},${r + q}h1v1h-1z`;
+    document.getElementById('qr').innerHTML =
+      `<svg viewBox="0 0 ${side} ${side}" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg"><rect width="${side}" height="${side}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+    const size = (s) => {
+      document.body.classList.toggle('a4', s === 'A4');
+      document.getElementById('page').textContent = `@page { size: ${s}; margin: 0; }`;
+      document.getElementById('sA5').classList.toggle('on', s === 'A5');
+      document.getElementById('sA4').classList.toggle('on', s === 'A4');
+    };
+    document.getElementById('sA5').onclick = () => size('A5');
+    document.getElementById('sA4').onclick = () => size('A4');
+  }
+  </script>
+</body>
+</html>

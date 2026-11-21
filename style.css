@@ -1,0 +1,91 @@
+/* dinkreds.dk: the app's own colours and type (Standard theme), calm and quiet. Fonts are served from here,
+   not from Google, so a visit tells nobody else. */
+@font-face { font-family: 'Fraunces'; src: url('fonts/Fraunces_400Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'DM Sans'; src: url('fonts/DMSans_400Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'DM Sans'; src: url('fonts/DMSans_500Medium.ttf') format('truetype'); font-weight: 500; font-display: swap; }
+
+:root {
+  --text: #1B1A19;
+  --text-2: #736E69;
+  --bg: #F8F6F2;
+  --line: #E8E4DD;
+  --card: #FFFFFF;
+  --accent: #E4572E;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --text: #F4F1EC; --text-2: #A09A91; --bg: #171615; --line: #34312D; --accent: #FF7A4D; --card: #23211F; }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 400 17px/1.6 'DM Sans', system-ui, -apple-system, sans-serif;
+}
+main { max-width: 620px; margin: 0 auto; padding: 56px 20px 40px; }
+
+.mark { font: 400 30px/1 'Fraunces', Georgia, serif; color: var(--text); text-decoration: none; letter-spacing: -0.01em; }
+.mark span { color: var(--accent); }
+header { margin-bottom: 64px; }
+
+h1 { font: 400 40px/1.15 'Fraunces', Georgia, serif; letter-spacing: -0.015em; margin: 0 0 20px; }
+h2 { font: 500 13px/1.4 'DM Sans', sans-serif; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2); margin: 48px 0 12px; }
+h3 { font: 500 17px/1.5 'DM Sans', sans-serif; margin: 28px 0 4px; }
+p, li { margin: 0 0 12px; }
+ul { padding-left: 20px; margin: 0 0 12px; }
+.lead { font-size: 20px; line-height: 1.5; }
+.quiet { color: var(--text-2); }
+a { color: inherit; text-decoration-color: var(--line); text-underline-offset: 3px; }
+a:hover { text-decoration-color: currentColor; }
+
+.quote { font: 400 italic 20px/1.5 'Fraunces', Georgia, serif; border-left: 1px solid var(--line); padding-left: 16px; margin: 32px 0; }
+
+table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); }
+th { font-weight: 500; color: var(--text-2); font-size: 13px; }
+
+footer { max-width: 620px; margin: 0 auto; padding: 24px 20px 56px; border-top: 1px solid var(--line); font-size: 15px; color: var(--text-2); }
+footer a { margin-right: 16px; }
+
+@media (max-width: 480px) {
+  main { padding-top: 40px; }
+  header { margin-bottom: 44px; }
+  h1 { font-size: 32px; }
+  table { font-size: 14px; }
+}
+
+/* A longer document (the privacy policy): numbered sections with room, a short summary, tables on cards. */
+.doc main { max-width: 680px; }
+.doc .meta { color: var(--text-2); font-size: 15px; margin: -8px 0 36px; }
+.doc .summary { border-left: 2px solid var(--accent); padding: 4px 0 4px 20px; margin: 0 0 56px; }
+.doc .summary p { font: 400 20px/1.45 'Fraunces', Georgia, serif; margin: 0 0 6px; }
+.doc section { padding: 36px 0 8px; border-top: 1px solid var(--line); }
+.doc h2 {
+  font: 400 24px/1.3 'Fraunces', Georgia, serif; letter-spacing: -0.005em; text-transform: none; color: var(--text);
+  margin: 0 0 16px; display: flex; align-items: baseline; gap: 14px;
+}
+.doc .num { font: 500 12px/1 'DM Sans', sans-serif; letter-spacing: 0.12em; color: var(--text-2); min-width: 20px; }
+.doc .note { color: var(--text-2); font-size: 15px; }
+.doc table { background: var(--card); border: 1px solid var(--line); border-radius: 14px; border-collapse: separate;
+  border-spacing: 0; overflow: hidden; margin: 4px 0 16px; }
+.doc th, .doc td { padding: 12px 16px; }
+.doc th { font: 500 12px/1.4 'DM Sans', sans-serif; letter-spacing: 0.1em; text-transform: uppercase; background: transparent; }
+.doc tbody tr:last-child td { border-bottom: 0; }
+.doc .pairs td:last-child { color: var(--text-2); width: 38%; }
+.doc .three td:first-child, .doc .pairs td:first-child { font-weight: 500; }
+.doc .three td:last-child { color: var(--text-2); white-space: nowrap; }
+.doc ul { padding-left: 18px; }
+.doc li { padding-left: 4px; }
+
+@media (max-width: 560px) {
+  .doc h2 { font-size: 21px; }
+  .doc .summary p { font-size: 18px; }
+  /* Tables become stacked rows on a phone: the first column as a small heading, the rest below it. */
+  .doc table, .doc tbody, .doc tr, .doc td { display: block; width: auto !important; }
+  .doc thead { display: none; }
+  .doc tr { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .doc tbody tr:last-child { border-bottom: 0; }
+  .doc td { padding: 0; border: 0; white-space: normal !important; }
+  .doc td + td { margin-top: 4px; }
+}

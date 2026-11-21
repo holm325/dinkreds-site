@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Overblik · Kreds</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    /* The admin page: numbers only, from admin_stats() (supabase/migrations/0026). Nothing here is secret; the
+       database answers only admins. No libraries: plain fetch to Supabase, charts drawn as SVG. */
+    main { max-width: 1080px; }
+    header { margin-bottom: 40px; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+    .who { font-size: 14px; color: var(--text-2); }
+    .who button { margin-left: 12px; }
+    button, input { font: inherit; }
+    input { width: 100%; padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text); font-size: 17px; }
+    button.primary { width: 100%; margin-top: 12px; padding: 13px 18px; border: 0; border-radius: 999px; background: var(--accent); color: #fff; font-weight: 500; cursor: pointer; }
+    button.link { border: 0; background: none; color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 0; font-size: 14px; }
+    .login { max-width: 380px; }
+    .error { color: var(--accent); font-size: 15px; min-height: 24px; margin-top: 10px; }
+    .note { font-size: 14px; color: var(--text-2); }
+
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin: 8px 0 8px; }
+    .tile { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; }
+    .tile .k { font-size: 13px; color: var(--text-2); }
+    .tile .v { font: 400 32px/1.15 'Fraunces', Georgia, serif; margin-top: 4px; }
+    .tile .s { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+    .tile.hero { grid-column: span 2; }
+    .tile.hero .v { font-size: 44px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px 16px 10px; }
+    .card h3 { margin: 0; font-size: 15px; }
+    .card .sub { font-size: 13px; color: var(--text-2); margin: 2px 0 8px; }
+    .card.wide { grid-column: 1 / -1; }
+    .tile, .card, .grid > * { min-width: 0; }
+    svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+    svg text { font: 400 11px 'DM Sans', system-ui, sans-serif; fill: var(--text-2); }
+    .bar { fill: var(--accent); }
+    .bar.soft { fill: color-mix(in srgb, var(--accent) 32%, var(--card)); }
+    .hit { fill: transparent; cursor: default; }
+    .hit:hover + .bar, .bar:hover { opacity: 0.8; }
+    .axis { stroke: var(--line); stroke-width: 1; }
+    .legend { display: flex; gap: 16px; font-size: 13px; color: var(--text-2); margin: 0 0 6px; }
+    .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: var(--accent); }
+    .legend i.soft { background: color-mix(in srgb, var(--accent) 32%, var(--card)); }
+
+    .funnel { width: 100%; border-collapse: collapse; }
+    .funnel td { border: 0; padding: 6px 8px 6px 0; vertical-align: middle; font-size: 14px; }
+    .funnel .name { width: 34%; }
+    .funnel .track { position: relative; height: 26px; }
+    .funnel .ever, .funnel .week { position: absolute; left: 0; top: 0; height: 12px; border-radius: 0 4px 4px 0; }
+    .funnel .ever { background: color-mix(in srgb, var(--accent) 32%, var(--card)); top: 14px; }
+    .funnel .week { background: var(--accent); }
+    .funnel .num { width: 22%; text-align: right; color: var(--text-2); white-space: nowrap; }
+
+    .heat td, .heat th { text-align: center; padding: 8px 4px; font-size: 13px; border-bottom: 0; }
+    .heat td.c { border-radius: 6px; border: 2px solid var(--card); }
+    .heat th { color: var(--text-2); font-weight: 500; }
+    .heat td:first-child, .heat th:first-child { text-align: left; color: var(--text-2); }
+
+    #tip { position: fixed; pointer-events: none; background: var(--text); color: var(--bg); font-size: 13px; padding: 6px 9px; border-radius: 8px; opacity: 0; transition: opacity .1s; white-space: nowrap; z-index: 5; }
+    .hidden { display: none; }
+    .err { border-top: 1px solid var(--line); padding: 10px 0; margin: 0; }
+    .err:first-child { border-top: 0; }
+    .err summary { list-style: none; cursor: pointer; display: flex; flex-direction: column; gap: 2px; color: var(--text); font-size: 15px; }
+    .err summary::-webkit-details-marker { display: none; }
+    .err .meta { font-size: 13px; color: var(--text-2); }
+    .err .fatal { color: var(--accent); font-weight: 500; }
+    .err pre { white-space: pre-wrap; font-size: 12px; color: var(--text-2); margin: 8px 0 0; }
+    details { margin-top: 12px; }
+    summary { cursor: pointer; color: var(--text-2); font-size: 14px; }
+    /* Tabs: Overblik · Kilder. */
+    .tabs { display: flex; gap: 6px; margin: 4px 0 8px; }
+    .tabs button { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 7px 16px; font-size: 15px; cursor: pointer; }
+    .tabs button[aria-selected="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+    /* Steder: one card per place, with its status and actions. */
+    .bar-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 12px; }
+    .bar-row input { width: auto; flex: 1; min-width: 180px; padding: 9px 12px; font-size: 15px; }
+    .chip { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 6px 13px; font-size: 14px; cursor: pointer; }
+    .chip[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+    .pl .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .pl .meta { font-size: 13px; color: var(--text-2); margin: 2px 0 8px; overflow-wrap: anywhere; }
+    .pl .desc { font-size: 14px; margin: 0 0 8px; }
+    .pl .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 6px; }
+    .pl .actions button, .pl form button { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 6px 13px; font-size: 14px; cursor: pointer; }
+    .pl .actions button.go { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .pl form { display: grid; gap: 8px; margin: 8px 0; }
+    .pl form input, .pl form textarea { font-size: 15px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); font: inherit; }
+    .pl .staff { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; margin-top: 6px; }
+    .pl .staff span { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 10px; }
+    .pl .staff span button { border: 0; background: none; color: var(--text-2); cursor: pointer; font-size: 14px; padding: 0 6px; }
+    .pl .msg { font-size: 13px; color: var(--accent); min-height: 0; }
+    .pl .msg.ok { color: var(--text-2); }
+    .status { font-size: 12px; font-weight: 500; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+    .status.approved { background: color-mix(in srgb, #3f8f5a 18%, var(--card)); color: #2f7a48; }
+    .status.pending { background: color-mix(in srgb, #c9962b 22%, var(--card)); color: #8a6414; }
+    .status.suspended { background: color-mix(in srgb, var(--text) 10%, var(--card)); color: var(--text-2); }
+    /* A source: its grade, then one line per measure. */
+    .src h3 { display: flex; align-items: center; gap: 8px; }
+    .src .url { font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; margin: 2px 0 10px; }
+    .src .url a { color: inherit; }
+    .grade { font-size: 12px; font-weight: 500; padding: 2px 9px; border-radius: 999px; }
+    .grade.g { background: color-mix(in srgb, #3f8f5a 18%, var(--card)); color: #2f7a48; }
+    .grade.y { background: color-mix(in srgb, #c9962b 22%, var(--card)); color: #8a6414; }
+    .grade.r { background: color-mix(in srgb, var(--accent) 20%, var(--card)); color: var(--accent); }
+    .why { font-size: 13px; color: var(--text-2); margin: -4px 0 8px; }
+    .kv { display: grid; grid-template-columns: 9.5em 1fr; gap: 6px 12px; margin: 0 0 8px; font-size: 14px; }
+    .kv dt { color: var(--text-2); }
+    .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+    @media (max-width: 480px) { .kv { grid-template-columns: 1fr; gap: 0 0; } .kv dd { margin-bottom: 6px; } }
+    @media (max-width: 480px) { .tile.hero { grid-column: span 1; } .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <a class="mark" href="../">kreds<span>.</span></a>
+      <span class="who hidden" id="who"><span id="whoMail"></span><button class="link" id="logout">Log ud</button></span>
+    </header>
+
+    <!-- Sign in: a code by mail, as in the app. Only existing Kreds accounts; the numbers only for admins. -->
+    <section class="login hidden" id="login">
+      <h1>Overblik</h1>
+      <p class="quiet">Log ind med din Kreds-mail. Kun administratorer ser tallene.</p>
+      <form id="mailForm">
+        <input type="email" id="mail" placeholder="Din mail" autocomplete="email" required>
+        <button class="primary" type="submit">Send kode</button>
+      </form>
+      <form id="codeForm" class="hidden">
+        <p class="note" id="sentTo"></p>
+        <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="Koden fra mailen" required>
+        <button class="primary" type="submit">Log ind</button>
+        <p><button class="link" type="button" id="again">Brug en anden mail</button></p>
+      </form>
+      <!-- kreds-dev only: its test accounts have passwords, and its built-in mail can't send codes. -->
+      <form id="pwForm" class="hidden" style="margin-top:28px">
+        <p class="note">kreds-dev: log ind med en testkonto og adgangskode.</p>
+        <input type="email" id="pwMail" placeholder="anna@kreds.test" autocomplete="username">
+        <input type="password" id="pw" placeholder="Adgangskode" autocomplete="current-password" style="margin-top:8px">
+        <button class="primary" type="submit">Log ind</button>
+      </form>
+      <div class="error" id="loginError"></div>
+    </section>
+
+    <section class="hidden" id="board">
+      <h1>Overblik</h1>
+      <p class="quiet" id="stamp"></p>
+      <nav class="tabs" role="tablist">
+        <button role="tab" id="tabBtnStats" aria-selected="true" data-tab="stats">Overblik</button>
+        <button role="tab" id="tabBtnSources" aria-selected="false" data-tab="sources">Kilder</button>
+        <button role="tab" id="tabBtnPlaces" aria-selected="false" data-tab="places">Steder</button>
+      </nav>
+
+      <div id="tabPlaces" class="hidden">
+        <p class="quiet">Alle steder i Kreds. Nye steder kommer ind gennem registret (<code>data/steder.csv</code> og
+          <code>sync</code>); her godkender, retter og sætter du dem på pause, og styrer hvem der administrerer dem.</p>
+        <div class="bar-row" id="plFilters"></div>
+        <div class="grid" id="places2"></div>
+      </div>
+
+      <div id="tabSources" class="hidden">
+        <p class="quiet">Siderne Kreds læser for steders program (<code>docs/auto-import.md</code>). Tallene er fra hver gang importen kører.</p>
+        <div class="tiles" id="srcTiles"></div>
+        <div class="card wide" style="margin-bottom:12px"><h3>Tokens pr. dag</h3><p class="sub">Alle kilder · seneste 30 dage</p>
+          <div class="legend"><span><i></i>Ind (sidernes tekst)</span><span><i class="soft"></i>Ud (svarene)</span></div>
+          <div id="srcTotal"></div></div>
+        <div class="grid" id="sources"></div>
+        <details><summary>Sådan bedømmes en kilde</summary>
+          <p class="note"><b>Rød</b>: kan ikke hentes 3 kørsler i træk, ingen fuld kørsel endnu, eller under 50 % af eventsene er de samme fra kørsel til kørsel.
+          <b>Gul</b>: fejlede sidst, under 80 % stabil, under 70 % har klokkeslæt, eller under 80 % af titlerne står ordret på siden.
+          <b>Grøn</b>: ellers. Stabil = andelen af events, der er de samme som i kørslen før (snit af de seneste 5).</p>
+        </details>
+      </div>
+
+      <div id="tabStats">
+      <h2>Lige nu</h2>
+      <div class="tiles" id="tiles"></div>
+
+      <h2>Hver dag</h2>
+      <div class="grid">
+        <div class="card wide"><h3>Aktive brugere</h3><p class="sub" id="activeSub">Har åbnet Kreds den dag · seneste 90 dage</p><div id="dActive"></div></div>
+        <div class="card"><h3>Nye brugere</h3><p class="sub">Seneste 90 dage</p><div id="dNew"></div></div>
+        <div class="card"><h3>Klar på oprettet</h3><p class="sub">Seneste 90 dage</p><div id="dKlar"></div></div>
+        <div class="card"><h3>"Jeg er med"</h3><p class="sub">Svar på venners Klar på · seneste 90 dage</p><div id="dResp"></div></div>
+      </div>
+
+      <h2>Hver uge</h2>
+      <div class="grid" id="weekly"></div>
+
+      <h2>De første skridt</h2>
+      <div class="grid">
+        <div class="card wide">
+          <h3>Hvor langt kommer nye brugere?</h3>
+          <p class="sub" id="funnelSub"></p>
+          <div class="legend"><span><i></i>Inden for første uge</span><span><i class="soft"></i>Nogensinde</span></div>
+          <table class="funnel" id="funnel"></table>
+        </div>
+        <div class="card wide">
+          <h3>Kommer de igen?</h3>
+          <p class="sub">Andel af ugens nye brugere, der åbnede Kreds 1, 2, 3 og 4 uger senere</p>
+          <table class="heat" id="cohorts"></table>
+        </div>
+      </div>
+
+      <h2>Spredning</h2>
+      <div class="grid">
+        <div class="card"><h3>Personer i deres Kreds</h3><p class="sub">Antal brugere</p><div id="sPeople"></div></div>
+        <div class="card"><h3>Forbindelser</h3><p class="sub">Antal brugere</p><div id="sConn"></div></div>
+        <div class="card"><h3>Dage med Kreds</h3><p class="sub">Seneste 30 dage · antal brugere</p><div id="sDays"></div></div>
+      </div>
+
+      <h2>Steder</h2>
+      <div class="card wide"><table id="places"></table></div>
+
+      <h2>Fejl i appen</h2>
+      <div class="card wide">
+        <p class="sub" id="errorsSub">Seneste 30 dage. Samme fejl samlet. Tryk på en fejl for at se, hvor i koden den skete.</p>
+        <div id="errors"></div>
+        <p class="note">Når appen lukker helt ned (et crash), står det i App Store Connect under TestFlight → Crashes.</p>
+      </div>
+
+      <h2>Administratorer</h2>
+      <div class="card wide"><table id="admins"></table>
+        <p class="note">Tilføjes og fjernes med <code>node scripts/place.mjs admin add|remove &lt;mail&gt; --pilot</code>.</p></div>
+
+      <h2>Alle tal</h2>
+      <div class="card wide"><table id="totals"></table></div>
+      <details><summary>Rå data (JSON)</summary><pre id="raw" style="white-space:pre-wrap;font-size:12px"></pre></details>
+      </div>
+    </section>
+  </main>
+  <div id="tip"></div>
+
+  <script>
+  // The pilot by default; ?db=dev for kreds-dev. Both keys are public (they are in the app).
+  const DBS = {
+    pilot: { url: 'https://pwlozuebxpeztsknzwro.supabase.co', key: 'sb_publishable_0p7rD57QGNgYvp0zWsM2AQ_ScCx9JBz' },
+    dev: { url: 'https://fjevnepdomxyaxhqwadk.supabase.co', key: 'sb_publishable_mfnY3wVHqB4h8CWqyuUhUg_KLTFZb9J' },
+  };
+  const which = new URLSearchParams(location.search).get('db') === 'dev' ? 'dev' : 'pilot';
+  const DB = DBS[which];
+  const STORE = 'kreds-admin-' + which;
+  const $ = (id) => document.getElementById(id);
+  const nf = new Intl.NumberFormat('da-DK');
+  const n = (v) => nf.format(v ?? 0);
+  const pct = (a, b) => (b ? Math.round((100 * a) / b) + ' %' : '–');
+
+  // ---- Session (kept in this browser only) ----
+  const load = () => { try { return JSON.parse(localStorage.getItem(STORE)); } catch { return null; } };
+  const save = (s) => { try { s ? localStorage.setItem(STORE, JSON.stringify(s)) : localStorage.removeItem(STORE); } catch {} };
+  const keep = (d) => save({ access_token: d.access_token, refresh_token: d.refresh_token,
+    expires_at: Date.now() + (d.expires_in ?? 3600) * 1000, email: d.user?.email });
+
+  async function auth(path, body) {
+    const r = await fetch(DB.url + '/auth/v1/' + path, { method: 'POST',
+      headers: { apikey: DB.key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.msg || d.error_description || d.message || 'Det lykkedes ikke.');
+    return d;
+  }
+  async function token() {
+    const s = load();
+    if (!s) return null;
+    if (Date.now() < s.expires_at - 60000) return s.access_token;
+    try { const d = await auth('token?grant_type=refresh_token', { refresh_token: s.refresh_token }); keep(d); return d.access_token; }
+    catch { save(null); return null; }
+  }
+
+  // ---- Sign in ----
+  let mail = '';
+  $('mailForm').onsubmit = async (e) => {
+    e.preventDefault(); $('loginError').textContent = '';
+    mail = $('mail').value.trim();
+    try {
+      await auth('otp', { email: mail, create_user: false });
+      $('mailForm').classList.add('hidden'); $('codeForm').classList.remove('hidden');
+      $('sentTo').textContent = 'Vi har sendt en kode til ' + mail + '.'; $('code').focus();
+    } catch (err) { $('loginError').textContent = 'Kunne ikke sende en kode. Har mailen en Kreds-konto?'; }
+  };
+  $('codeForm').onsubmit = async (e) => {
+    e.preventDefault(); $('loginError').textContent = '';
+    try { keep(await auth('verify', { type: 'email', email: mail, token: $('code').value.trim() })); start(); }
+    catch { $('loginError').textContent = 'Koden passer ikke, eller den er for gammel.'; }
+  };
+  if (which === 'dev') $('pwForm').classList.remove('hidden');
+  $('pwForm').onsubmit = async (e) => {
+    e.preventDefault(); $('loginError').textContent = '';
+    try { keep(await auth('token?grant_type=password', { email: $('pwMail').value.trim(), password: $('pw').value })); start(); }
+    catch { $('loginError').textContent = 'Mail eller adgangskode passer ikke.'; }
+  };
+  $('again').onclick = () => { $('codeForm').classList.add('hidden'); $('mailForm').classList.remove('hidden'); };
+  $('logout').onclick = () => { save(null); location.reload(); };
+
+  async function start() {
+    const t = await token();
+    if (!t) { show('login'); return; }
+    const r = await fetch(DB.url + '/rest/v1/rpc/admin_stats', { method: 'POST',
+      headers: { apikey: DB.key, Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }, body: '{}' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      save(null); show('login');
+      $('loginError').textContent = d.message === 'not_admin' ? 'Den konto har ikke adgang til tallene.' : 'Tallene kunne ikke hentes.';
+      return;
+    }
+    $('whoMail').textContent = (load()?.email ?? '') + (which === 'dev' ? ' · kreds-dev' : '');
+    $('who').classList.remove('hidden');
+    show('board'); draw(d);
+    if (!$('tabPlaces').classList.contains('hidden')) loadPlaces(); // opened on #steder before signing in
+    // What went wrong in the app (0033).
+    fetch(DB.url + '/rest/v1/rpc/admin_errors', { method: 'POST',
+      headers: { apikey: DB.key, Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }, body: '{"p_days":30}' })
+      .then((r) => (r.ok ? r.json() : [])).then((rows) => {
+        const when = (s) => new Date(s).toLocaleString('da-DK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        $('errors').innerHTML = rows.length ? rows.map((e) => `<details class="err"><summary>
+            <span class="msg">${e.fatal ? '<b class="fatal">Lukkede appen</b> ' : ''}${esc(e.message)}</span>
+            <span class="meta">${n(e.times)} gange · ${n(e.people)} ${e.people === 1 ? 'person' : 'personer'} · sidst ${when(e.last_at)}${e.screen ? ' · ' + esc(e.screen) : ''}${e.builds?.length ? ' · ' + esc(e.builds.join(', ')) : ''}</span>
+          </summary><pre>${esc(e.stack ?? 'Ingen stak')}</pre></details>`).join('')
+          : '<p class="quiet">Ingen fejl de seneste 30 dage.</p>';
+      }).catch(() => {});
+    // The importer's sources and how good they are (0059).
+    fetch(DB.url + '/rest/v1/rpc/admin_import', { method: 'POST',
+      headers: { apikey: DB.key, Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }, body: '{}' })
+      .then((r) => (r.ok ? r.json() : [])).then(drawSources).catch(() => drawSources([]));
+    // Who else can see this.
+    fetch(DB.url + '/rest/v1/rpc/admin_list', { method: 'POST',
+      headers: { apikey: DB.key, Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }, body: '{}' })
+      .then((r) => (r.ok ? r.json() : [])).then((rows) => {
+        $('admins').innerHTML = '<tr><th>Mail</th><th>Admin siden</th></tr>' + rows.map((a) =>
+          `<tr><td>${esc(a.email)}</td><td>${new Date(a.since).toLocaleDateString('da-DK', { day: 'numeric', month: 'long', year: 'numeric' })}</td></tr>`).join('');
+      }).catch(() => {});
+  }
+  // ---- Tabs (remembered in the address: #kilder) ----
+  const HASH = { sources: '#kilder', places: '#steder' };
+  function tab(name) {
+    $('tabStats').classList.toggle('hidden', name !== 'stats');
+    $('tabSources').classList.toggle('hidden', name !== 'sources');
+    $('tabPlaces').classList.toggle('hidden', name !== 'places');
+    $('tabBtnStats').setAttribute('aria-selected', name === 'stats');
+    $('tabBtnSources').setAttribute('aria-selected', name === 'sources');
+    $('tabBtnPlaces').setAttribute('aria-selected', name === 'places');
+    history.replaceState(null, '', location.search + (HASH[name] ?? ''));
+    if (name === 'places') loadPlaces();
+    if (name === 'stats' && last) draw(last); // charts are drawn at the card's width, which was 0 while hidden
+    if (name === 'sources' && lastSources) drawSources(lastSources);
+  }
+  document.querySelectorAll('.tabs button').forEach((b) => (b.onclick = () => tab(b.dataset.tab)));
+
+  // ---- Kilder ----
+  // Green, yellow or red, with the reasons: see "Sådan bedømmes en kilde" on the page.
+  function grade(s) {
+    const f = s.last_full, red = [], yellow = [];
+    if (s.fail_streak >= 3) red.push(`fejlet ${s.fail_streak} gange i træk`);
+    else if (s.fail_streak > 0) yellow.push('fejlede sidst');
+    if (!f) red.push('ingen fuld kørsel endnu');
+    if (s.stability !== null && s.stability < 0.5) red.push(`ustabil: ${pct(s.stability, 1)}`);
+    else if (s.stability !== null && s.stability < 0.8) yellow.push(`ustabil: ${pct(s.stability, 1)}`);
+    if (f && f.events > 0 && f.with_time / f.events < 0.7) yellow.push(`kun ${pct(f.with_time, f.events)} har klokkeslæt`);
+    if (f && f.events > 0 && f.titles / f.events < 0.8) yellow.push(`kun ${pct(f.titles, f.events)} af titlerne står på siden`);
+    return red.length ? ['r', 'Rød', red] : yellow.length ? ['y', 'Gul', yellow] : ['g', 'Grøn', []];
+  }
+  const when = (x) => x ? new Date(x).toLocaleString('da-DK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '–';
+  const day = (x) => x ? new Date(x).toLocaleDateString('da-DK', { day: 'numeric', month: 'short' }) : '–';
+  const k = (v) => v >= 1e6 ? (v / 1e6).toLocaleString('da-DK', { maximumFractionDigits: 1 }) + ' mio.' : n(v);
+
+  // Tokens per day as stacked columns: in (solid), out (light).
+  const tokenBars = (daily) => (daily ?? []).map((x) => ({ label: dayLabel(x.day), value: x.input, soft: x.output,
+    tip: `${dayLabel(x.day)}: ${n(x.input)} ind · ${n(x.output)} ud` }));
+  let lastSources = null;
+  function drawSources(rows) {
+    lastSources = rows;
+    if (!rows.length) {
+      $('srcTiles').innerHTML = '';
+      $('sources').innerHTML = '<div class="card wide"><p class="quiet">Ingen kilder endnu. Tilføjes med <code>node scripts/place.mjs source add &lt;sted&gt; &lt;url&gt;</code>.</p></div>';
+      return;
+    }
+    const graded = rows.map((s) => ({ s, g: grade(s) })).sort((a, b) => 'ryg'.indexOf(a.g[0]) - 'ryg'.indexOf(b.g[0]));
+    const sum = (f) => rows.reduce((t, s) => t + (f(s) ?? 0), 0);
+    $('srcTiles').innerHTML = [
+      tile('Kilder', n(rows.filter((s) => s.active).length), `${n(graded.filter((x) => x.g[0] === 'g').length)} grønne · ${n(graded.filter((x) => x.g[0] === 'y').length)} gule · ${n(graded.filter((x) => x.g[0] === 'r').length)} røde`),
+      tile('Tokens · 30 dage', k(sum((s) => s.input_tokens_30d)), `ind · ${k(sum((s) => s.output_tokens_30d))} ud`),
+      tile('Kørsler · 30 dage', n(sum((s) => s.runs_30d)), `${n(sum((s) => s.unchanged_30d))} sprunget over (siden uændret)`),
+      tile('Udkast', n(sum((s) => s.open)), `åbne · ${n(sum((s) => s.posted))} lagt op · ${n(sum((s) => s.dismissed))} nej`),
+    ].join('');
+    $('sources').innerHTML = graded.map(({ s, g }) => {
+      const f = s.last_full ?? {};
+      const of = (a) => f.events ? `${n(a)}/${n(f.events)}` : '–';
+      const decided = s.posted + s.dismissed;
+      return `<div class="card src">
+        <h3>${esc(s.place)} <span class="grade ${g[0]}">${g[1]}</span></h3>
+        <p class="url"><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a>${s.active ? '' : ' · slået fra'}</p>
+        ${g[2].length ? `<p class="why">${esc(g[2].join(' · '))}</p>` : ''}
+        <dl class="kv">
+          <dt>Når vi frem</dt><dd>${s.fail_streak ? `Fejlet ${n(s.fail_streak)} gang${s.fail_streak > 1 ? 'e' : ''} i træk: ${esc(s.last_error ?? '')}` : 'Ja'} · sidst ${when(s.last_run_at)}</dd>
+          <dt>Stabil</dt><dd>${s.stability === null ? '–' : pct(s.stability, 1)} <span class="quiet">af eventsene som i kørslen før</span></dd>
+          <dt>Fundet på siden</dt><dd>titler ${of(f.titles)} · ${n(f.times_dropped)} tider og ${n(f.prices_dropped)} priser fjernet · ${n(f.dates_unseen)} datoer ikke set</dd>
+          <dt>Har med</dt><dd>tid ${of(f.with_time)} · pris ${of(f.with_price)} · link ${of(f.with_link)}</dd>
+          <dt>Rækker frem til</dt><dd>${day(f.last_day)} · ${n(f.events)} events</dd>
+          <dt>Siden</dt><dd>${n(f.characters)} tegn (${n(f.sent_characters)} sendt) · ${n(f.detail_pages)} eventsider læst</dd>
+          <dt>Tokens · 30 dage</dt><dd>${k(s.input_tokens_30d)} ind · ${k(s.output_tokens_30d)} ud · ${n(s.unchanged_30d)} af ${n(s.runs_30d)} kørsler sprunget over</dd>
+          <dt>Personalet</dt><dd>${n(s.posted)} lagt op · ${n(s.dismissed)} nej · ${n(s.open)} åbne${decided >= 5 ? ` · ${pct(s.posted, decided)} lagt op` : ''}</dd>
+        </dl>
+        <p class="sub" style="margin-top:4px">Tokens pr. dag · 30 dage</p><div class="srcChart" data-i="${rows.indexOf(s)}"></div>
+      </div>`;
+    }).join('');
+    // The total, day by day, and each source's own (drawn once the cards are in place, at their width).
+    const days = rows[0].daily ?? [];
+    bars($('srcTotal'), tokenBars(days.map((d, i) => ({ day: d.day,
+      input: rows.reduce((t, s) => t + (s.daily?.[i]?.input ?? 0), 0), output: rows.reduce((t, s) => t + (s.daily?.[i]?.output ?? 0), 0) }))), { height: 170 });
+    document.querySelectorAll('.srcChart').forEach((host) => bars(host, tokenBars(rows[+host.dataset.i].daily), { height: 90 }));
+  }
+
+  // ---- Steder ----
+  // The same admin functions the app's Indstillinger → Steder uses (0018): admin_places, admin_set_place_status,
+  // admin_save_place, admin_add_staff, admin_remove_staff. They answer admins only. Each card also shows the page
+  // the importer reads and its last result (admin_import, matched by name).
+  async function rpc(name, body = {}) {
+    const t = await token();
+    const r = await fetch(DB.url + '/rest/v1/rpc/' + name, { method: 'POST',
+      headers: { apikey: DB.key, Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(d?.message || 'fejl');
+    return d;
+  }
+  const STATUS = { approved: 'Godkendt', pending: 'Afventer', suspended: 'På pause' };
+  const ERR = { not_paused: 'Sæt stedet på pause først.', no_such_user: 'Ingen Kreds-konto med den mail. De skal logge ind i appen én gang først.',
+    not_admin: 'Din konto har ikke adgang.', no_such_place: 'Stedet findes ikke længere.' };
+  let placeRows = null, placeFilter = 'all', placeQuery = '', openEdit = null;
+  const placeMsg = {}, placeOk = {}; // a line under a card; ok = not an error (grey, not red)
+  async function loadPlaces() {
+    try {
+      const [rows, sources] = await Promise.all([rpc('admin_places'), rpc('admin_import').catch(() => [])]);
+      placeRows = rows.map((p) => ({ ...p, src: (sources ?? []).filter((x) => x.place === p.name) }));
+    } catch (e) { $('places2').innerHTML = `<div class="card wide"><p class="quiet">${esc(ERR[e.message] ?? 'Stederne kunne ikke hentes.')}</p></div>`; return; }
+    drawPlaces();
+  }
+  function drawPlaces() {
+    const rows = placeRows ?? [];
+    const count = (st) => rows.filter((p) => st === 'all' || p.status === st).length;
+    $('plFilters').innerHTML = [['all', 'Alle'], ['pending', 'Afventer'], ['approved', 'Godkendt'], ['suspended', 'På pause']]
+      .map(([k, l]) => `<button class="chip" data-f="${k}" aria-pressed="${placeFilter === k}">${l} ${count(k)}</button>`).join('')
+      + `<input id="plSearch" placeholder="Søg navn eller by" value="${esc(placeQuery)}">`;
+    document.querySelectorAll('#plFilters .chip').forEach((b) => (b.onclick = () => { placeFilter = b.dataset.f; drawPlaces(); }));
+    const search = $('plSearch');
+    search.oninput = () => { placeQuery = search.value; const pos = search.selectionStart; drawPlaces(); const s2 = $('plSearch'); s2.focus(); s2.setSelectionRange(pos, pos); };
+    const q = placeQuery.trim().toLowerCase();
+    const shown = rows.filter((p) => (placeFilter === 'all' || p.status === placeFilter)
+      && (!q || `${p.name} ${p.city}`.toLowerCase().includes(q)));
+    if (!shown.length) { $('places2').innerHTML = '<div class="card wide"><p class="quiet">Ingen steder her.</p></div>'; return; }
+    $('places2').innerHTML = shown.map((p) => {
+      const src = p.src.find((x) => x.active) ?? p.src[0];
+      const f = src?.last_full;
+      const imp = !src ? 'Ingen side læses' : !f ? `Læser ${esc(src.url)} · ikke kørt endnu`
+        : `Læser <a href="${esc(src.url)}" target="_blank" rel="noopener">${esc(src.url.replace(/^https?:\/\//, ''))}</a> · ${n(f.events)} events · ${n(src.open)} åbne udkast`;
+      const actions = ['approved', 'pending', 'suspended'].filter((st) => st !== p.status).map((st) =>
+        `<button data-act="status" data-id="${p.id}" data-st="${st}" class="${st === 'approved' ? 'go' : ''}">${{ approved: 'Godkend', pending: 'Sæt til afventer', suspended: 'Sæt på pause' }[st]}</button>`).join('');
+      const edit = openEdit === p.id ? `<form data-id="${p.id}">
+          <input name="name" value="${esc(p.name)}" maxlength="80" placeholder="Navn" required>
+          <input name="address" value="${esc(p.address ?? '')}" maxlength="120" placeholder="Adresse">
+          <input name="city" value="${esc(p.city ?? '')}" maxlength="60" placeholder="By" required>
+          <textarea name="description" maxlength="200" rows="2" placeholder="Lidt om stedet">${esc(p.description ?? '')}</textarea>
+          <div><button type="submit">Gem</button> <button type="button" data-act="cancel">Fortryd</button></div>
+        </form>` : '';
+      return `<div class="card pl">
+        <div class="head"><h3>${esc(p.name)}</h3><span class="status ${p.status}">${STATUS[p.status] ?? esc(p.status)}</span></div>
+        <p class="meta">${esc(p.city ?? '')}${p.address ? ' · ' + esc(p.address) : ''}${p.latitude == null ? ' · uden kortplacering' : ''} · ${n(p.followers)} følger</p>
+        ${p.description ? `<p class="desc">${esc(p.description)}</p>` : ''}
+        <p class="meta">${imp}</p>
+        <label class="meta" style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" data-auto="${p.id}" ${p.auto_post ? 'checked' : ''} style="width:auto">
+          Læg udkast op automatisk <span class="quiet">(kun dem med klokkeslæt)</span></label>
+        ${edit}
+        <div class="actions">${actions}${openEdit === p.id ? '' : `<button data-act="edit" data-id="${p.id}">Ret</button>`}${p.status === 'suspended' ? `<button data-act="delete" data-id="${p.id}">Slet stedet</button>` : ''}</div>
+        <div class="staff">Administreres af: ${(p.staff ?? []).map((m) => `<span>${esc(m)}<button data-act="unstaff" data-id="${p.id}" data-mail="${esc(m)}" title="Fjern">×</button></span>`).join('') || '<em class="quiet">ingen</em>'}</div>
+        <div class="bar-row"><input data-staff="${p.id}" type="email" placeholder="Tilføj administrator (mail)"><button class="chip" data-act="staff" data-id="${p.id}">Tilføj</button></div>
+        <p class="msg${placeOk[p.id] ? ' ok' : ''}">${esc(placeMsg[p.id] ?? '')}</p>
+      </div>`;
+    }).join('');
+  }
+  // After deleting: a line at the top, and a reminder to mark it in the register so sync doesn't bring it back.
+  function alertDeleted(name) {
+    const note = document.createElement('p');
+    note.className = 'note';
+    note.textContent = `${name} er slettet. Sæt kreds_sted til "nej" i data/steder.csv, så det står i registret.`;
+    $('places2').before(note);
+  }
+  // Clicks and saves, on the whole list.
+  $('places2').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    const id = b.dataset.id ?? b.closest('form')?.dataset.id;
+    const p = (placeRows ?? []).find((x) => x.id === id);
+    const act = b.dataset.act;
+    placeMsg[id] = ''; placeOk[id] = false;
+    try {
+      if (act === 'edit') { openEdit = id; drawPlaces(); return; }
+      if (act === 'cancel') { openEdit = null; drawPlaces(); return; }
+      if (act === 'status') {
+        if (b.dataset.st === 'suspended' && !confirm(`Sætte ${p.name} på pause? Det skjules for alle med det samme.`)) return;
+        if (b.dataset.st === 'approved' && which === 'pilot' && !confirm(`Godkende ${p.name}? Rigtige brugere kan så se stedet.`)) return;
+        await rpc('admin_set_place_status', { p_id: id, p_status: b.dataset.st });
+      } else if (act === 'delete') {
+        // Only a paused place (the database checks it too): for one that doesn't want to be in Kreds any more.
+        if (!confirm(`Slette ${p.name} for altid?\n\nAlt om stedet forsvinder: dets Klar på, følgere, administratorer, kilder og udkast. Det kan ikke fortrydes.`)) return;
+        await rpc('admin_delete_place', { p_id: id });
+        placeMsg[id] = '';
+        alertDeleted(p.name);
+      } else if (act === 'staff') {
+        const mail = document.querySelector(`input[data-staff="${id}"]`).value.trim();
+        if (!mail.includes('@')) { placeMsg[id] = 'Skriv en mail.'; drawPlaces(); return; }
+        await rpc('admin_add_staff', { p_place: id, p_email: mail });
+      } else if (act === 'unstaff') {
+        if (!confirm(`Fjerne ${b.dataset.mail} som administrator af ${p.name}?`)) return;
+        await rpc('admin_remove_staff', { p_place: id, p_email: b.dataset.mail });
+      }
+    } catch (err) { placeMsg[id] = ERR[err.message] ?? 'Det lykkedes ikke.'; drawPlaces(); return; }
+    await loadPlaces();
+  });
+  // "Læg udkast op automatisk": from the next run of the importer, its drafts with a time become Klar på by themselves.
+  $('places2').addEventListener('change', async (e) => {
+    const box = e.target.closest('input[data-auto]');
+    if (!box) return;
+    const id = box.dataset.auto, p = placeRows.find((x) => x.id === id);
+    if (box.checked && which === 'pilot' && !confirm(`Lægge ${p.name}s udkast op automatisk? De bliver til Klar på, som rigtige brugere ser, uden at nogen har set dem først. Kun udkast med klokkeslæt.`)) { box.checked = false; return; }
+    try { await rpc('admin_set_auto_post', { p_id: id, p_on: box.checked }); placeMsg[id] = box.checked ? 'Lægges op automatisk fra næste kørsel.' : ''; placeOk[id] = true; }
+    catch (err) { placeMsg[id] = ERR[err.message] ?? 'Det lykkedes ikke.'; placeOk[id] = false; }
+    await loadPlaces();
+  });
+  $('places2').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target, id = form.dataset.id, p = placeRows.find((x) => x.id === id);
+    const v = Object.fromEntries(new FormData(form));
+    let { latitude, longitude } = p;
+    // A new address: its point from OpenStreetMap; not found, none (the app looks it up then).
+    if ((v.address ?? '').trim() !== (p.address ?? '')) {
+      latitude = null; longitude = null;
+      if (v.address.trim()) {
+        try {
+          const r = await fetch('https://nominatim.openstreetmap.org/search?' + new URLSearchParams({ q: v.address, format: 'jsonv2', limit: '1', countrycodes: 'dk' }));
+          const [hit] = await r.json();
+          if (hit) { latitude = Number(hit.lat); longitude = Number(hit.lon); }
+        } catch { /* none */ }
+      }
+    }
+    try {
+      await rpc('admin_save_place', { p_id: id, p_name: v.name, p_address: v.address, p_city: v.city, p_description: v.description,
+        p_latitude: latitude, p_longitude: longitude });
+      openEdit = null;
+    } catch (err) { placeMsg[id] = ERR[err.message] ?? 'Det kunne ikke gemmes.'; drawPlaces(); return; }
+    await loadPlaces();
+  });
+
+  const show = (id) => { $('login').classList.toggle('hidden', id !== 'login'); $('board').classList.toggle('hidden', id !== 'board'); };
+
+  // ---- Tooltip ----
+  const tip = $('tip');
+  document.addEventListener('mousemove', (e) => {
+    const t = e.target.closest('[data-tip]');
+    if (!t) { tip.style.opacity = 0; return; }
+    tip.textContent = t.dataset.tip; tip.style.opacity = 1;
+    const x = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8);
+    tip.style.left = x + 'px'; tip.style.top = (e.clientY - 34) + 'px';
+  });
+
+  // ---- Charts ----
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (name, attrs, parent) => { const x = document.createElementNS(NS, name); for (const k in attrs) x.setAttribute(k, attrs[k]); parent?.appendChild(x); return x; };
+  // A bar with its top corners rounded (4px), standing on the baseline.
+  const barPath = (x, y, w, h, r) => { r = Math.min(r, w / 2, h); return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`; };
+  const nice = (m) => { if (m <= 4) return Math.max(1, Math.ceil(m)); const p = Math.pow(10, Math.floor(Math.log10(m))); return Math.ceil(m / p * 2) / 2 * p; };
+
+  // Columns over time (or categories). items: [{label, value, tip, soft?}]; `soft` is stacked on top, lighter.
+  function bars(host, items, { height = 150, labelEvery } = {}) {
+    host.innerHTML = '';
+    // Drawn at the card's real width, so the text stays 11px however small the card is.
+    const W = Math.max(200, host.clientWidth || 600), H = height, L = 30, B = 20, T = 8;
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img' }, host);
+    const max = nice(Math.max(1, ...items.map((i) => i.value + (i.soft ?? 0))));
+    const plotH = H - B - T, step = (W - L) / items.length, gap = Math.min(2, step * 0.25), w = step - gap;
+    for (const f of (Number.isInteger(max / 2) ? [0.5, 1] : [1])) { // a quiet guide at half (when whole) and the top
+      const y = T + plotH * (1 - f);
+      el('line', { x1: L, x2: W, y1: y, y2: y, class: 'axis', 'stroke-dasharray': '2 4' }, svg);
+      el('text', { x: L - 6, y: y + 4, 'text-anchor': 'end' }, svg).textContent = n(max * f);
+    }
+    el('line', { x1: L, x2: W, y1: T + plotH, y2: T + plotH, class: 'axis' }, svg);
+    const every = Math.max(labelEvery ?? 1, Math.ceil(items.length / Math.max(2, Math.floor(W / 56))));
+    items.forEach((it, i) => {
+      const x = L + i * step + gap / 2, h = (plotH * it.value) / max;
+      const tipText = it.tip ?? `${it.label}: ${n(it.value)}`;
+      el('rect', { x: L + i * step, y: T, width: step, height: plotH, class: 'hit', 'data-tip': tipText }, svg);
+      const hs = (plotH * (it.soft ?? 0)) / max;
+      if (h > 0) el('path', { d: barPath(x, T + plotH - h, w, h, hs > 0 ? 0 : 4), class: 'bar', 'data-tip': tipText }, svg);
+      if (hs > 0) el('path', { d: barPath(x, T + plotH - h - hs, w, hs, 4), class: 'bar soft', 'data-tip': tipText }, svg);
+      if (i % every === 0 || items.length <= 8) el('text', { x: x + w / 2, y: H - 5, 'text-anchor': 'middle' }, svg).textContent = it.label;
+    });
+  }
+
+  const dayLabel = (s) => { const d = new Date(s); return d.getDate() + '/' + (d.getMonth() + 1); };
+  const weekNo = (s) => { const d = new Date(s); const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day); return Math.ceil(((t - new Date(Date.UTC(t.getUTCFullYear(), 0, 1))) / 86400000 + 1) / 7); };
+
+  function tile(k, v, s, hero) {
+    return `<div class="tile${hero ? ' hero' : ''}"><div class="k">${k}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ''}</div>`;
+  }
+
+  // Redrawn when the window changes width.
+  let last = null, again = 0;
+  addEventListener('resize', () => { clearTimeout(again); again = setTimeout(() => { if (last) draw(last); if (lastSources) drawSources(lastSources); }, 150); });
+
+  function draw(d) {
+    last = d;
+    const T = d.totals, A = d.active, F = d.funnel;
+    $('stamp').textContent = 'Opdateret ' + new Date(d.generated_at).toLocaleString('da-DK', { dateStyle: 'long', timeStyle: 'short' }) + (which === 'dev' ? ' · kreds-dev' : ' · piloten');
+    $('tiles').innerHTML = [
+      tile('Aktive de sidste 7 dage', n(A.week), `${pct(A.week, T.users)} af alle · ${n(A.today)} i dag · ${n(A.month)} på 30 dage`, true),
+      tile('Brugere', n(T.users), `+ ${n(T.place_accounts)} stedkonti`),
+      tile('Forbindelser', n(T.connections), `${n(T.invites_used)} af ${n(T.invites_made)} invitationer brugt`),
+      tile('Klar på i alt', n(T.klar_paa), `${n(T.klar_paa_live)} lige nu`),
+      tile('Med nogen', pct(T.klar_paa_joined, T.klar_paa), `${n(T.klar_paa_joined)} Klar på fik "Jeg er med"`),
+      tile('"Jeg er med"', n(T.responses), `+ ${n(T.place_responses)} hos steder`),
+      tile('Personer i Kredse', n(T.people), `${n(T.linked_people)} koblet til en ven`),
+      tile('Noter og datoer', n(T.notes + T.dates), `${n(T.notes)} noter · ${n(T.dates)} datoer · ${n(T.todos)} to-dos`),
+      tile('Steder', n(T.places), `${n(T.place_followers)} følger et sted`),
+    ].join('');
+
+    if (A.since) $('activeSub').textContent = 'Har åbnet Kreds den dag · talt fra ' + new Date(A.since).toLocaleDateString('da-DK', { day: 'numeric', month: 'long' });
+    const daily = d.daily;
+    bars($('dActive'), daily.map((x) => ({ label: dayLabel(x.day), value: x.active })), { height: 190 });
+    bars($('dNew'), daily.map((x) => ({ label: dayLabel(x.day), value: x.new_users })), {});
+    bars($('dKlar'), daily.map((x) => ({ label: dayLabel(x.day), value: x.klar_paa })), {});
+    bars($('dResp'), daily.map((x) => ({ label: dayLabel(x.day), value: x.responses })), {});
+
+    const W = [
+      ['active', 'Aktive brugere', 'Åbnede Kreds mindst én gang'],
+      ['new_users', 'Nye brugere', ''],
+      ['connections', 'Nye forbindelser', ''],
+      ['klar_paa', 'Klar på oprettet', ''],
+      ['klar_paa_joined', 'Klar på med nogen', 'Fik mindst ét "Jeg er med"'],
+      ['responses', '"Jeg er med"', 'Til venners Klar på'],
+      ['place_responses', '"Jeg er med" hos steder', ''],
+      ['people', 'Nye personer i Kredse', 'Tilføjet af brugerne'],
+      ['notes', 'Nye noter', ''],
+      ['dates', 'Nye datoer', 'Fødselsdage og andet'],
+    ];
+    $('weekly').innerHTML = W.map(([k, title, sub]) => `<div class="card"><h3>${title}</h3><p class="sub">${sub || 'Seneste 26 uger'}</p><div id="w_${k}"></div></div>`).join('');
+    for (const [k] of W) bars($('w_' + k), d.weekly.map((x) => ({ label: 'u' + weekNo(x.week), value: x[k], tip: `Uge ${weekNo(x.week)}: ${n(x[k])}` })), {});
+
+    $('funnelSub').textContent = `Af alle ${n(F.users)} brugere (uden stedkonti)`;
+    const steps = [
+      ['person', 'Tilføjede en person'], ['note', 'Skrev en note eller dato'], ['connected', 'Forbandt sig med en ven'],
+      ['klar_paa', 'Oprettede et Klar på'], ['got_join', 'Fik et "Jeg er med"'], ['gave_join', 'Sagde "Jeg er med"'],
+    ];
+    $('funnel').innerHTML = steps.map(([k, label]) => {
+      const wk = F[k + '_7d'], ev = F[k], u = F.users || 1;
+      return `<tr><td class="name">${label}</td><td><div class="track">
+        <div class="week" style="width:${(100 * wk) / u}%" data-tip="Første uge: ${n(wk)} (${pct(wk, F.users)})"></div>
+        <div class="ever" style="width:${(100 * ev) / u}%" data-tip="Nogensinde: ${n(ev)} (${pct(ev, F.users)})"></div>
+      </div></td><td class="num">${pct(wk, F.users)} · ${pct(ev, F.users)}</td></tr>`;
+    }).join('');
+
+    $('cohorts').innerHTML = '<tr><th>Uge</th><th>Nye</th><th>+1 uge</th><th>+2</th><th>+3</th><th>+4</th></tr>' +
+      d.cohorts.slice().reverse().map((c) => {
+        const now = Date.now();
+        return `<tr><td>Uge ${weekNo(c.week)}</td><td>${n(c.size)}</td>` + c.back.map((b, i) => {
+          const future = new Date(c.week).getTime() + (i + 1) * 7 * 86400000 > now;
+          if (future || !c.size) return '<td class="c" style="color:var(--text-2)">–</td>';
+          const p = b / c.size;
+          return `<td class="c" data-tip="${n(b)} af ${n(c.size)}" style="background:color-mix(in srgb, var(--accent) ${Math.round(8 + p * 80)}%, var(--card));color:${p > 0.5 ? '#fff' : 'var(--text)'}">${Math.round(p * 100)} %</td>`;
+        }).join('') + '</tr>';
+      }).join('');
+
+    const spread = (host, obj) => bars(host, Object.entries(obj).map(([k, v]) => ({ label: k, value: v })), { height: 130 });
+    spread($('sPeople'), d.spread.people);
+    spread($('sConn'), d.spread.connections);
+    spread($('sDays'), d.spread.active_days_30);
+
+    const status = { approved: 'Godkendt', suspended: 'På pause', pending: 'Afventer' };
+    $('places').innerHTML = '<tr><th>Sted</th><th>By</th><th>Status</th><th>Følgere</th><th>Klar på · 30 dage</th><th>Med · 30 dage</th></tr>' +
+      (d.places.length ? d.places.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.city ?? '')}</td><td>${status[p.status] ?? p.status}</td><td>${n(p.followers)}</td><td>${n(p.klar_paa_30d)}</td><td>${n(p.in_30d)}</td></tr>`).join('')
+        : '<tr><td colspan="6" class="quiet">Ingen steder endnu.</td></tr>');
+
+    const names = { users: 'Brugere', place_accounts: 'Stedkonti', people: 'Personer i Kredse', linked_people: 'Personer koblet til en ven',
+      notes: 'Noter', dates: 'Datoer', todos: 'To-dos', relations: 'Relationer mellem personer', connections: 'Forbindelser',
+      klar_paa: 'Klar på i alt', klar_paa_joined: 'Klar på med "Jeg er med"', responses: '"Jeg er med" til venner',
+      place_responses: '"Jeg er med" hos steder', klar_paa_live: 'Klar på lige nu', places: 'Godkendte steder',
+      place_followers: 'Følger et sted', invites_made: 'Invitationer lavet', invites_used: 'Invitationer brugt',
+      push_users: 'Brugere med push slået til', blocks: 'Fjernede forbindelser (blokeringer)', reports: 'Anmeldelser' };
+    $('totals').innerHTML = Object.entries(T).map(([k, v]) => `<tr><td>${names[k] ?? k}</td><td style="text-align:right">${n(v)}</td></tr>`).join('');
+    $('raw').textContent = JSON.stringify(d, null, 2);
+  }
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  if (location.hash === '#kilder') tab('sources');
+  if (location.hash === '#steder') tab('places');
+  start();
+  </script>
+</body>
+</html>

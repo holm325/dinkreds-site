@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.holm325.kreds",
+      "sha256_cert_fingerprints": [
+        "CA:B7:15:0F:E0:F4:FD:21:23:A7:2A:E3:B8:C1:FB:07:43:DC:A6:76:01:9A:8C:02:11:1F:3B:0A:54:7B:F5:53",
+        "FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C"
+      ]
+    }
+  }
+]

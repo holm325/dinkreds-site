@@ -1,0 +1,929 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Jeres sted · Kreds</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    /* A place's staff run their place from a computer: the same as the app's place view (Klar på, drafts found on
+       their own page, profile, numbers), through the same tables and functions. Nothing here is trusted: row-level
+       security and the database's own checks decide who may do what (0007, 0019, 0032, 0035, 0036, 0053, 0054). No
+       libraries: plain fetch to Supabase. Numbers only, never who. */
+    main { max-width: 880px; }
+    header { margin-bottom: 36px; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .who { font-size: 14px; color: var(--text-2); display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    .login { max-width: 380px; }
+    .login input { width: 100%; padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text); font-size: 17px; }
+    .error { color: var(--accent); font-size: 15px; min-height: 24px; margin-top: 10px; }
+    .note { font-size: 14px; color: var(--text-2); }
+    .hidden { display: none !important; }
+
+    /* Buttons: one accent per view (Del / Gem / Læg op), the rest quiet. */
+    .btn { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 7px 15px; font-size: 15px; cursor: pointer; white-space: nowrap; transition: background-color .15s ease-out; }
+    .btn:hover:not([disabled]) { background: color-mix(in srgb, var(--text) 5%, var(--card)); }
+    .btn.go, button.primary { background: color-mix(in srgb, var(--accent) 82%, #000); border-color: transparent; color: #fff; }
+    .btn.go:hover:not([disabled]) { background: color-mix(in srgb, var(--accent) 72%, #000); }
+    button.primary { width: 100%; margin-top: 12px; padding: 13px 18px; border: 0; border-radius: 999px; font-weight: 500; cursor: pointer; }
+    @media (prefers-color-scheme: dark) {
+      .btn.go, button.primary { background: var(--accent); color: #1c1411; }
+      .btn.go:hover:not([disabled]) { background: color-mix(in srgb, var(--accent) 88%, #fff); }
+    }
+    .btn[disabled], button.primary[disabled] { opacity: .45; cursor: default; }
+    .btn.big { padding: 11px 22px; font-size: 16px; font-weight: 500; }
+    .link { border: 0; background: none; color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 0; font-size: 14px; }
+    .danger { color: var(--accent); }
+
+    .placepick { font-size: 14px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); }
+    .banner { background: color-mix(in srgb, #c9962b 16%, var(--card)); border: 1px solid color-mix(in srgb, #c9962b 35%, var(--line)); border-radius: 14px; padding: 12px 16px; font-size: 15px; margin: 0 0 18px; }
+
+    .tabs { display: flex; gap: 6px; margin: 0 0 22px; flex-wrap: wrap; }
+    .tabs button { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 7px 16px; font-size: 15px; cursor: pointer; }
+    .tabs button[aria-selected="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+    .tabs b { font-weight: 500; color: var(--accent); margin-left: 4px; }
+    .tabs button[aria-selected="true"] b { color: inherit; }
+
+    .bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 0 14px; flex-wrap: wrap; }
+    .bar h2 { margin: 0; }
+    .list { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; margin-bottom: 8px; }
+    .list .empty { padding: 18px 20px; margin: 0; color: var(--text-2); font-size: 15px; }
+    .item { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 14px 18px; border-top: 1px solid var(--line); }
+    .item:first-child { border-top: 0; }
+    .day { text-align: center; line-height: 1.15; }
+    .day b { display: block; font: 400 26px/1.1 'Fraunces', Georgia, serif; }
+    .day small { display: block; font-size: 12px; color: var(--text-2); text-transform: uppercase; letter-spacing: .06em; }
+    .day.now small { color: var(--accent); font-weight: 500; }
+    .what { min-width: 0; }
+    .what b { display: block; font-weight: 500; font-size: 16px; overflow-wrap: anywhere; }
+    .what .meta { font-size: 14px; color: var(--text-2); overflow-wrap: anywhere; }
+    .what .meta .live { color: var(--accent); font-weight: 500; }
+    .acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .acts .btn { padding: 5px 12px; font-size: 14px; }
+    .confirm { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 14px; background: color-mix(in srgb, var(--accent) 6%, var(--card)); border-radius: 12px; padding: 10px 14px; }
+    .confirm span { flex: 1; min-width: 200px; }
+    details.older { margin-top: 18px; }
+    details.older summary { cursor: pointer; color: var(--text-2); font-size: 14px; margin-bottom: 10px; }
+    @media (max-width: 600px) {
+      .item { grid-template-columns: 48px minmax(0, 1fr); }
+      .acts { grid-column: 1 / -1; justify-content: flex-start; }
+    }
+
+    /* The form: one column, labels above, the extras grouped at the end. */
+    .form { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; max-width: 640px; }
+    .form h2 { margin: 0 0 6px; color: var(--text); font: 400 26px/1.2 'Fraunces', Georgia, serif; letter-spacing: 0; text-transform: none; }
+    .fld { display: grid; gap: 5px; margin: 16px 0 0; }
+    .fld > span, .lbl { font-size: 13px; font-weight: 500; color: var(--text-2); }
+    .fld input, .fld select, .fld textarea { width: 100%; font-size: 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+    .fld textarea { resize: vertical; min-height: 90px; line-height: 1.5; }
+    .fld input:focus, .fld select:focus, .fld textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
+    .row3 { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 10px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .row3 .fld, .row2 .fld { margin-top: 0; }
+    @media (max-width: 520px) { .row3, .row2 { grid-template-columns: 1fr; } }
+    .hint { font-size: 13px; color: var(--text-2); margin: 4px 0 0; }
+    .hint.bad { color: var(--accent); }
+    .count { font-size: 12px; color: var(--text-2); text-align: right; }
+    .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--bg); }
+    .seg button { border: 0; background: none; padding: 7px 14px; font-size: 14px; cursor: pointer; }
+    .seg button + button { border-left: 1px solid var(--line); }
+    .seg button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+    .often { display: flex; gap: 10px; align-items: center; margin-top: 8px; font-size: 14px; }
+    .often select { width: auto; padding: 6px 10px; font-size: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+    fieldset.more { border: 0; border-top: 1px solid var(--line); margin: 24px 0 0; padding: 8px 0 0; }
+    fieldset.more legend { font-size: 13px; font-weight: 500; color: var(--text-2); padding: 0 8px 0 0; }
+    .photo { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .photo img { width: 160px; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
+    .foot { display: flex; gap: 14px; align-items: center; justify-content: flex-end; margin-top: 24px; }
+    .problem { color: var(--accent); font-size: 14px; margin: 14px 0 0; }
+    .problem:empty { display: none; }
+    .ok { color: var(--text-2); font-size: 14px; }
+
+    /* Profile: a logo square, a cover, photos in a row. */
+    .photo img.logo { width: 88px; height: 88px; border-radius: 18px; object-fit: cover; border: 1px solid var(--line); background: var(--bg); }
+    .photo img.cover { width: 100%; max-width: 420px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); }
+    .thumbs { display: flex; gap: 10px; flex-wrap: wrap; }
+    .thumb { position: relative; }
+    .thumb img { width: 110px; height: 110px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); display: block; }
+    .thumb button { position: absolute; top: 4px; right: 4px; border: 0; border-radius: 999px; width: 26px; height: 26px; background: rgba(0,0,0,.6); color: #fff; cursor: pointer; font-size: 15px; line-height: 1; }
+    .file { display: inline-block; }
+    .file input { display: none; }
+
+    /* Numbers. */
+    .hero { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; }
+    .hero .k { font-size: 14px; color: var(--text-2); font-weight: 500; }
+    .hero .v { font: 400 52px/1.1 'Fraunces', Georgia, serif; margin: 4px 0; }
+    .hero .s { font-size: 14px; color: var(--text-2); }
+    .hero .more { font-size: 15px; font-weight: 500; margin-top: 6px; }
+    .chart { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px 8px; margin-top: 12px; }
+    .chart h3 { margin: 0 0 8px; font-size: 14px; color: var(--text-2); font-weight: 500; }
+    .chart svg { display: block; width: 100%; height: auto; }
+    .chart svg text { font: 400 11px 'DM Sans', system-ui, sans-serif; fill: var(--text-2); }
+    .chart .b { fill: var(--text); opacity: .78; }
+    .check { display: flex; gap: 10px; align-items: flex-start; font-size: 15px; cursor: pointer; max-width: 60ch; }
+    .check input { margin-top: 5px; accent-color: var(--accent); }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin: 8px 0 8px; }
+    .tile { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; min-width: 0; }
+    .tile .k { font-size: 13px; color: var(--text-2); }
+    .tile .v { font: 400 32px/1.15 'Fraunces', Georgia, serif; margin-top: 4px; }
+    .tile .s { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <a class="mark" href="../">kreds<span>.</span></a>
+      <span class="who hidden" id="who">
+        <select class="placepick hidden" id="placePick" aria-label="Sted"></select>
+        <span id="whoMail"></span><button class="link" id="logout">Log ud</button>
+      </span>
+    </header>
+
+    <!-- Sign in: a code by mail, as in the app. Staff use their own Kreds account. -->
+    <section class="login hidden" id="login">
+      <h1>Jeres sted</h1>
+      <p class="quiet">Log ind med den mail, I bruger i Kreds. Så kan I lave og rette det, I er klar på, fra computeren.</p>
+      <form id="mailForm">
+        <input type="email" id="mail" placeholder="Din mail" autocomplete="email" required>
+        <button class="primary" type="submit">Send kode</button>
+      </form>
+      <form id="codeForm" class="hidden">
+        <p class="note" id="sentTo"></p>
+        <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="Koden fra mailen" required>
+        <button class="primary" type="submit">Log ind</button>
+        <p><button class="link" type="button" id="again">Brug en anden mail</button></p>
+      </form>
+      <!-- kreds-dev only: its test accounts have passwords, and its built-in mail can't send codes. -->
+      <form id="pwForm" class="hidden" style="margin-top:28px">
+        <p class="note">kreds-dev: log ind med en testkonto og adgangskode.</p>
+        <input type="email" id="pwMail" placeholder="anna@kreds.test" autocomplete="username">
+        <input type="password" id="pw" placeholder="Adgangskode" autocomplete="current-password" style="margin-top:8px">
+        <button class="primary" type="submit">Log ind</button>
+      </form>
+      <div class="error" id="loginError"></div>
+    </section>
+
+    <!-- Signed in, but not staff anywhere. -->
+    <section class="hidden" id="noPlace">
+      <h1>Intet sted endnu</h1>
+      <p class="quiet">Den konto er ikke tilknyttet et sted i Kreds. Skriv til <a href="mailto:hej@dinkreds.dk">hej@dinkreds.dk</a>, så sætter vi jer op.</p>
+    </section>
+
+    <section class="hidden" id="board">
+      <h1 id="placeName"></h1>
+      <div class="banner hidden" id="banner"></div>
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="klar" aria-selected="true">Klar på</button>
+        <button role="tab" data-tab="drafts" aria-selected="false">Fundet på jeres side<b id="draftCount"></b></button>
+        <button role="tab" data-tab="profile" aria-selected="false">Profil</button>
+        <button role="tab" data-tab="numbers" aria-selected="false">Tal</button>
+      </nav>
+
+      <div id="tabKlar">
+        <div id="klarList">
+          <div class="bar"><h2>I gang og på vej</h2><button class="btn go big" id="newBtn">Nyt Klar på</button></div>
+          <div class="list" id="upcoming"></div>
+          <details class="older" id="olderBox"><summary>Afsluttet</summary><div class="list" id="ended"></div></details>
+        </div>
+        <form class="form hidden" id="kForm" novalidate></form>
+      </div>
+
+      <div id="tabDrafts" class="hidden">
+        <p class="quiet" style="max-width:60ch">Kreds har læst jeres hjemmeside. Læg det op, I vil have med, og sig nej til resten. Tjek tid og tekst, før I deler.</p>
+        <div class="list" id="drafts"></div>
+      </div>
+
+      <div id="tabProfile" class="hidden"><form class="form" id="pForm" novalidate></form></div>
+
+      <div id="tabNumbers" class="hidden">
+        <div class="hero" id="nHero"></div>
+        <h2>Følgere</h2>
+        <div class="tiles" id="nFollow"></div>
+        <div class="chart" id="nFollowChart"></div>
+        <h2>Det, I er klar på</h2>
+        <p class="note">De sidste 8 uger.</p>
+        <div class="tiles" id="nKlar"></div>
+        <div class="chart" id="nInChart"></div>
+        <h2>Ringe i vandet</h2>
+        <p id="nRipples"></p>
+        <p class="note">Når en gæst trykker "Tag nogen med?", ser deres venner, hvad I er klar på.</p>
+        <h2>Hvornår de siger ja</h2>
+        <div class="tiles" id="nTiming"></div>
+        <p class="note" id="nBest"></p>
+        <h2>Gæster</h2>
+        <div class="tiles" id="nGuests"></div>
+        <h2>Månedlig rapport</h2>
+        <label class="check"><input type="checkbox" id="nDigest"> Månedens tal med grafer den 1. i hver måned, til den mail du logger ind med.</label>
+        <p class="note" style="margin-top:28px">Kun tal, aldrig hvem. Opdelinger om gæster vises fra 5 personer.</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+  // The pilot by default; ?db=dev for kreds-dev. Both keys are public (they are in the app).
+  const DBS = {
+    pilot: { url: 'https://pwlozuebxpeztsknzwro.supabase.co', key: 'sb_publishable_0p7rD57QGNgYvp0zWsM2AQ_ScCx9JBz' },
+    dev: { url: 'https://fjevnepdomxyaxhqwadk.supabase.co', key: 'sb_publishable_mfnY3wVHqB4h8CWqyuUhUg_KLTFZb9J' },
+  };
+  const which = new URLSearchParams(location.search).get('db') === 'dev' ? 'dev' : 'pilot';
+  const DB = DBS[which];
+  const STORE = 'kreds-sted-' + which;
+  const BUCKET = 'place-logos';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const HOUR = 3600000, DAY = 24 * HOUR;
+
+  // ---- Session (kept in this browser only) ----
+  const load = () => { try { return JSON.parse(localStorage.getItem(STORE)); } catch { return null; } };
+  const save = (s) => { try { s ? localStorage.setItem(STORE, JSON.stringify(s)) : localStorage.removeItem(STORE); } catch {} };
+  const keep = (d) => save({ access_token: d.access_token, refresh_token: d.refresh_token,
+    expires_at: Date.now() + (d.expires_in ?? 3600) * 1000, email: d.user?.email, user_id: d.user?.id });
+  const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem(STORE + '-' + k); localStorage.setItem(STORE + '-' + k, v); } catch {} };
+
+  async function auth(path, body) {
+    const r = await fetch(DB.url + '/auth/v1/' + path, { method: 'POST',
+      headers: { apikey: DB.key, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.msg || d.error_description || d.message || 'failed');
+    return d;
+  }
+  async function token() {
+    const s = load();
+    if (!s) return null;
+    if (Date.now() < s.expires_at - 60000) return s.access_token;
+    try { const d = await auth('token?grant_type=refresh_token', { refresh_token: s.refresh_token }); keep({ ...d, user: d.user ?? { email: s.email, id: s.user_id } }); return d.access_token; }
+    catch { save(null); return null; }
+  }
+
+  // Every call: the signed-in user's token, so the database decides. Errors carry the database's own refusal
+  // ('too_far_ahead', 'place_too_many', …) in `refusal`.
+  class Refused extends Error { constructor(refusal, status) { super(refusal); this.refusal = refusal; this.status = status; } }
+  async function api(path, { method = 'GET', body, headers = {}, raw = false } = {}) {
+    const t = await token();
+    if (!t) { signedOut(); throw new Refused('signed_out', 401); }
+    let r;
+    try {
+      r = await fetch(DB.url + path, { method, body: raw ? body : body === undefined ? undefined : JSON.stringify(body),
+        headers: { apikey: DB.key, Authorization: 'Bearer ' + t, ...(raw ? {} : { 'Content-Type': 'application/json' }), ...headers } });
+    } catch { throw new Refused('offline', 0); }
+    const text = await r.text();
+    const d = text ? (() => { try { return JSON.parse(text); } catch { return text; } })() : null;
+    if (!r.ok) {
+      if (r.status === 401 || d?.code === 'PGRST301' || d?.code === 'PGRST303') { signedOut(); throw new Refused('signed_out', 401); }
+      throw new Refused(d?.code === 'P0001' ? (RAISED[d.message] ?? 'unknown') : 'unknown', r.status);
+    }
+    return d;
+  }
+  const rpc = (name, body = {}) => api('/rest/v1/rpc/' + name, { method: 'POST', body });
+  const rest = (q, opts) => api('/rest/v1/' + q, opts);
+  const publicUrl = (path) => (path ? `${DB.url}/storage/v1/object/public/${BUCKET}/${path.split('/').map(encodeURIComponent).join('/')}` : '');
+
+  // The same words as the app (src/i18n/da.ts, refused.*).
+  const RAISED = { too_long: 'too_long', too_far_ahead: 'too_far_ahead', place_too_many: 'too_many', place_not_approved: 'not_approved',
+    ended: 'ended', capacity_below_taken: 'capacity_below_taken', not_allowed: 'not_allowed' };
+  const REFUSED = {
+    offline: 'Det lykkedes ikke. Tjek nettet, og prøv igen.',
+    signed_out: 'Du er blevet logget ud. Log ind igen.',
+    too_long: 'Det kan højst vare 24 timer. Ret tidspunktet.',
+    too_far_ahead: 'Det skal starte inden for 3 måneder og højst vare 24 timer.',
+    too_many: 'I kan højst have 15 Klar på, der starter inden for den næste uge.',
+    not_approved: 'Stedet er ikke godkendt lige nu, så I kan ikke dele.',
+    ended: 'Det er slut og kan ikke længere rettes.',
+    capacity_below_taken: 'Der er allerede flere med end det. Vælg flere pladser.',
+    not_allowed: 'Det må den konto ikke.',
+    unknown: 'Det lykkedes ikke. Prøv igen om lidt.',
+  };
+  const why = (e) => REFUSED[e?.refusal] ?? REFUSED.unknown;
+
+  // ---- Sign in ----
+  let mail = '';
+  $('mailForm').onsubmit = async (e) => {
+    e.preventDefault(); $('loginError').textContent = '';
+    mail = $('mail').value.trim();
+    try {
+      await auth('otp', { email: mail, create_user: false });
+      $('mailForm').classList.add('hidden'); $('codeForm').classList.remove('hidden');
+      $('sentTo').textContent = 'Vi har sendt en kode til ' + mail + '.'; $('code').focus();
+    } catch { $('loginError').textContent = 'Kunne ikke sende en kode. Har mailen en Kreds-konto?'; }
+  };
+  $('codeForm').onsubmit = async (e) => {
+    e.preventDefault(); $('loginError').textContent = '';
+    try { keep(await auth('verify', { type: 'email', email: mail, token: $('code').value.trim() })); start(); }
+    catch { $('loginError').textContent = 'Koden passer ikke, eller den er for gammel.'; }
+  };
+  if (which === 'dev') $('pwForm').classList.remove('hidden');
+  $('pwForm').onsubmit = async (e) => {
+    e.preventDefault(); $('loginError').textContent = '';
+    try { keep(await auth('token?grant_type=password', { email: $('pwMail').value.trim(), password: $('pw').value })); start(); }
+    catch { $('loginError').textContent = 'Mail eller adgangskode passer ikke.'; }
+  };
+  $('again').onclick = () => { $('codeForm').classList.add('hidden'); $('mailForm').classList.remove('hidden'); };
+  $('logout').onclick = () => { save(null); location.reload(); };
+  function show(id) { for (const s of ['login', 'noPlace', 'board']) $(s).classList.toggle('hidden', s !== id); }
+  function signedOut() { save(null); $('who').classList.add('hidden'); show('login'); $('loginError').textContent = 'Du er blevet logget ud. Log ind igen.'; }
+
+  // ---- The place(s) this account is staff of ----
+  const COLS = 'id, name, address, status, tagline, website, logo_path, cover_path, kind, about, instagram, photo_paths, reward_text, reward_every';
+  let places = [], place = null;
+
+  async function start() {
+    if (!(await token())) { show('login'); return; }
+    let rows;
+    try { rows = await rest(`place_members?select=places(${COLS})`); } catch (e) { if (e.refusal !== 'signed_out') { show('login'); $('loginError').textContent = why(e); } return; }
+    places = rows.map((r) => r.places).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, 'da'));
+    $('whoMail').textContent = (load()?.email ?? '') + (which === 'dev' ? ' · kreds-dev' : '');
+    $('who').classList.remove('hidden');
+    if (!places.length) { show('noPlace'); return; }
+    const pick = $('placePick');
+    pick.innerHTML = places.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    pick.classList.toggle('hidden', places.length < 2);
+    const chosen = places.find((p) => p.id === pref('place')) ?? places[0];
+    pick.value = chosen.id;
+    pick.onchange = () => { pref('place', pick.value); open(places.find((p) => p.id === pick.value)); };
+    show('board');
+    open(chosen);
+  }
+
+  function open(p) {
+    place = p;
+    $('placeName').textContent = p.name;
+    const banner = { pending: 'Afventer godkendelse. Indtil da kan I ikke dele.', suspended: 'Sat på pause. Det, I er klar på, vises ikke.' }[p.status];
+    $('banner').textContent = banner ?? ''; $('banner').classList.toggle('hidden', !banner);
+    closeForm();
+    loadKlar(); loadDrafts(); drawProfile(); loadNumbers();
+  }
+
+  // ---- Tabs (remembered in the address: #udkast) ----
+  const HASH = { drafts: '#udkast', profile: '#profil', numbers: '#tal' };
+  const PANES = { klar: 'tabKlar', drafts: 'tabDrafts', profile: 'tabProfile', numbers: 'tabNumbers' };
+  function tab(name) {
+    document.querySelectorAll('.tabs button').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+    for (const [k, id] of Object.entries(PANES)) $(id).classList.toggle('hidden', k !== name);
+    history.replaceState(null, '', location.search + (HASH[name] ?? ''));
+  }
+  document.querySelectorAll('.tabs button').forEach((b) => (b.onclick = () => tab(b.dataset.tab)));
+  tab(Object.keys(HASH).find((k) => HASH[k] === location.hash) ?? 'klar');
+
+  // ---- Time, in Danish ----
+  const pad = (n) => String(n).padStart(2, '0');
+  const clock = (t) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }; // as the app
+  const isoDay = (t) => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  const isoClock = (t) => { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const startOfDay = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const weekday = (t) => new Date(t).toLocaleDateString('da-DK', { weekday: 'short' }).replace('.', '');
+  function dayWord(t) {
+    const diff = Math.round((startOfDay(t) - startOfDay(Date.now())) / DAY);
+    if (diff === 0) return 'i dag';
+    if (diff === 1) return 'i morgen';
+    return new Date(t).toLocaleDateString('da-DK', { weekday: 'long', day: 'numeric', month: 'long' });
+  }
+  const span = (s, e) => `${dayWord(s)} kl. ${clock(s)}–${clock(e)}`;
+  const repeatText = (every, unit) => every > 1 ? `Hver ${every}. ${unit === 'month' ? 'måned' : 'uge'}` : unit === 'month' ? 'Hver måned' : 'Hver uge';
+  function nextRepeat(t, every, unit) { // as src/data/places.tsx
+    const d = new Date(t);
+    if (unit === 'month') d.setMonth(d.getMonth() + every); else d.setDate(d.getDate() + 7 * every);
+    return d.getTime();
+  }
+
+  // ---- Klar på: the list ----
+  let items = [], rowsById = {};
+  async function loadKlar() {
+    const id = place.id;
+    $('upcoming').innerHTML = '<p class="empty">Henter …</p>';
+    try {
+      const [ov, rows] = await Promise.all([
+        rpc('place_overview', { p_place: id }),
+        rest(`place_klar_paa?place_id=eq.${id}&select=id,text,message,location,price,capacity,starts_at,expires_at,repeat_weekly,repeat_every,repeat_unit,photo_path,link,created_at,category&order=created_at.desc&limit=200`),
+      ]);
+      if (place.id !== id) return;
+      rowsById = Object.fromEntries(rows.map((r) => [r.id, r]));
+      items = ov.map((r) => ({ id: r.id, text: r.text, startsAt: Date.parse(r.starts_at), endsAt: Date.parse(r.expires_at),
+        capacity: r.capacity ?? undefined, taken: Number(r.taken), checkedIn: Number(r.checked_in ?? 0), repeat: !!r.repeat_weekly,
+        every: r.repeat_every ?? 1, unit: r.repeat_unit ?? 'week', pausedUntil: r.repeat_paused_until, waiting: Number(r.waiting ?? 0),
+        reach: Number(r.reach), returning: Number(r.returning_guests), viaFriends: Number(r.via_friends), shares: Number(r.shares),
+        sharedReach: Number(r.shared_reach), lead: r.lead_minutes ?? undefined, fullAfter: r.full_after_minutes ?? undefined,
+        good: Number(r.feedback_good ?? 0), better: Number(r.feedback_better ?? 0), thanks: r.thanks }));
+      drawKlar();
+    } catch (e) { $('upcoming').innerHTML = `<p class="empty">${esc(why(e))}</p>`; }
+  }
+  function itemHtml(k, ended) {
+    const now = Date.now(), live = !ended && k.startsAt <= now;
+    const facts = [live ? `<span class="live">I gang</span> · til kl. ${clock(k.endsAt)}` : `kl. ${clock(k.startsAt)}–${clock(k.endsAt)}`];
+    if (k.repeat && !ended) facts.push(repeatText(k.every, k.unit) + (k.pausedUntil ? ` · pause til ${new Date(k.pausedUntil).toLocaleDateString('da-DK', { day: 'numeric', month: 'short' })}` : ''));
+    facts.push(ended ? (k.taken ? `Nåede ${k.reach} følgere · ${k.taken} var med${k.checkedIn ? ` · ${k.checkedIn} kom` : ''}`
+        + ` · ${k.returning} har sagt ja før` + (k.viaFriends ? ` · ${k.viaFriends} via en ven` : '')
+        + (k.good + k.better ? ` · Godt: ${k.good}, kunne være bedre: ${k.better}` : '') : 'Ingen var med denne gang')
+      : `${k.taken} er med` + (k.capacity !== undefined ? ` af ${k.capacity}` : '') + (k.waiting ? ` · ${k.waiting} venter` : ''));
+    const d = new Date(k.startsAt);
+    return `<div class="item" data-id="${k.id}">
+      <div class="day${live ? ' now' : ''}"><small>${live ? 'Nu' : esc(weekday(k.startsAt))}</small><b>${d.getDate()}</b><small>${esc(d.toLocaleDateString('da-DK', { month: 'short' }).replace('.', ''))}</small></div>
+      <div class="what"><b>${esc(k.text)}</b><div class="meta">${facts.join(' · ')}</div></div>
+      <div class="acts">
+        ${ended ? '' : '<button class="btn" data-do="edit">Ret</button>'}
+        <button class="btn" data-do="copy">Opret igen</button>
+        ${ended ? '' : '<button class="btn" data-do="cancel">Aflys</button>'}
+      </div></div>`;
+  }
+  function drawKlar() {
+    const now = Date.now();
+    const open = items.filter((k) => k.endsAt > now).sort((a, b) => a.startsAt - b.startsAt);
+    const done = items.filter((k) => k.endsAt <= now).sort((a, b) => b.startsAt - a.startsAt).slice(0, 30);
+    $('upcoming').innerHTML = open.length ? open.map((k) => itemHtml(k, false)).join('') : '<p class="empty">Intet på vej lige nu.</p>';
+    $('ended').innerHTML = done.map((k) => itemHtml(k, true)).join('');
+    $('olderBox').classList.toggle('hidden', !done.length);
+    drawNumbers();
+  }
+  for (const host of ['upcoming', 'ended']) $(host).onclick = async (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    const row = b.closest('.item'), id = row?.dataset.id, k = items.find((x) => x.id === id);
+    if (!k) return;
+    if (b.dataset.do === 'edit') openForm({ mode: 'edit', id });
+    else if (b.dataset.do === 'copy') openForm({ mode: 'copy', id });
+    else if (b.dataset.do === 'cancel') {
+      if (row.querySelector('.confirm')) return;
+      row.insertAdjacentHTML('beforeend', `<div class="confirm"><span>Aflys "${esc(k.text)}"? Dem, der har sagt Jeg er med, får besked.</span>
+        <button class="btn" data-do="keep">Behold</button><button class="btn go" data-do="really">Aflys</button></div>`);
+    } else if (b.dataset.do === 'keep') b.closest('.confirm').remove();
+    else if (b.dataset.do === 'really') {
+      b.disabled = true;
+      try { await rest(`place_klar_paa?id=eq.${id}`, { method: 'DELETE' }); items = items.filter((x) => x.id !== id); drawKlar(); }
+      catch (err) { b.disabled = false; b.closest('.confirm').querySelector('span').textContent = why(err); }
+      loadKlar();
+    }
+  };
+  $('newBtn').onclick = () => openForm({ mode: 'new' });
+
+  // ---- Klar på: the form (new, edit, copy, from a draft) ----
+  const MAX_TEXT = 140, MAX_MESSAGE = 600, MAX_WHERE = 120, MAX_PRICE = 60, MAX_CAPACITY = 500, REPEAT_MAX = 12, MONTHS_AHEAD = 3;
+  let f = null; // the form's state
+
+  function cleanLink(input) { // as src/data/places.tsx
+    const s = input.trim();
+    if (!s) return undefined;
+    const url = /^https?:\/\//i.test(s) ? s : `https://${s}`;
+    return /^https?:\/\/[^\s/]+\.[^\s]+$/i.test(url) && url.length <= 300 ? url : false;
+  }
+  // The same weekday and clock as soon as it comes ("Opret igen", "Brug en tidligere").
+  function nextLike(startsAt, endsAt) {
+    const s = new Date(startsAt), today = new Date(); today.setHours(0, 0, 0, 0);
+    const d = new Date(today); d.setDate(d.getDate() + ((s.getDay() - today.getDay() + 7) % 7));
+    d.setHours(s.getHours(), s.getMinutes(), 0, 0);
+    if (d.getTime() + (endsAt - startsAt) <= Date.now()) d.setDate(d.getDate() + 7);
+    return d.getTime();
+  }
+  // The rows on the app's Lokalt (0073): one per event; none is "Andet". The same list as src/data/categories.ts.
+  const CATEGORIES = [['concerts', 'Koncerter'], ['night', 'Nat'], ['bar', 'Bar'], ['cafe', 'Caféer'], ['food', 'Mad & langbord'],
+    ['film', 'Film'], ['stage', 'Scene'], ['talks', 'Foredrag'], ['workshops', 'Workshops'], ['art', 'Kunst'], ['market', 'Marked'],
+    ['sport', 'Sport'], ['kids', 'For de helt små'], ['', 'Andet']];
+  const fromRow = (r) => ({ text: r.text, message: r.message ?? '', location: r.location ?? '', price: r.price ?? '',
+    capacity: r.capacity ?? '', link: r.link ?? '', photoPath: r.photo_path ?? null, category: r.category ?? '',
+    startsAt: Date.parse(r.starts_at), endsAt: Date.parse(r.expires_at),
+    repeat: !!r.repeat_weekly, every: r.repeat_every ?? 1, unit: r.repeat_unit ?? 'week' });
+
+  function openForm({ mode, id, draft }) {
+    const tomorrow = startOfDay(Date.now() + DAY);
+    let x = { text: '', message: '', location: '', price: '', capacity: '', link: '', photoPath: null, category: '',
+      startsAt: tomorrow + 10 * HOUR, endsAt: tomorrow + 12 * HOUR, repeat: false, every: 1, unit: 'week' };
+    let timeMissing = false, guessEnd = false;
+    if ((mode === 'edit' || mode === 'copy') && rowsById[id]) x = fromRow(rowsById[id]);
+    if (mode === 'copy') { const s = nextLike(x.startsAt, x.endsAt); x.endsAt = s + (x.endsAt - x.startsAt); x.startsAt = s; x.repeat = false; }
+    if (mode === 'draft') {
+      const day = new Date(`${draft.day}T19:00:00`).getTime();
+      timeMissing = !draft.starts_at; guessEnd = !!draft.starts_at && !draft.ends_at;
+      const s = draft.starts_at ? Date.parse(draft.starts_at) : day;
+      x = { ...x, text: draft.text, message: draft.message ?? '', location: draft.location ?? '', price: draft.price ?? '', link: draft.link ?? '',
+        startsAt: s, endsAt: draft.ends_at ? Date.parse(draft.ends_at) : s + 2 * HOUR, repeat: !!draft.weekly,
+        photoPath: draft.photo_path ?? null, category: draft.category ?? '' }; // the photo from the event's own page (0072): Fjern takes it off
+    }
+    f = { mode, id, draftId: draft?.id, photoPath: x.photoPath, newPhoto: null, repeat: x.repeat, every: x.every, unit: x.unit };
+    const where = x.location || place.address || '';
+    const maxDay = (() => { const d = new Date(startOfDay(Date.now())); d.setMonth(d.getMonth() + MONTHS_AHEAD); d.setDate(d.getDate() - 1); return isoDay(d); })();
+    // Earlier ones to start from: one of each text, newest first.
+    const seen = new Set();
+    const earlier = Object.values(rowsById).filter((r) => !seen.has(r.text.toLowerCase()) && seen.add(r.text.toLowerCase())).slice(0, 30);
+    const title = { new: 'Nyt Klar på', edit: 'Ret det, I er klar på', copy: 'Opret igen', draft: 'Fra jeres side' }[mode];
+
+    $('kForm').innerHTML = `
+      <h2>${title}</h2>
+      ${mode === 'draft' ? `<p class="hint">Fundet på jeres hjemmeside. Tjek det, og ret det, der ikke passer.${draft.link ? ` <a href="${esc(draft.link)}" target="_blank" rel="noopener">Se eventet</a>` : ''}</p>` : ''}
+      ${mode === 'new' && earlier.length ? `<label class="fld"><span>Brug en tidligere</span><select id="kEarlier"><option value="">Vælg …</option>
+        ${earlier.map((r) => `<option value="${r.id}">${esc(r.text)}</option>`).join('')}</select></label>` : ''}
+      <label class="fld"><span>Hvad er I klar på?</span>
+        <input id="kText" maxlength="${MAX_TEXT}" placeholder="fx brætspilsaften ved de lange borde" value="${esc(x.text)}" required></label>
+      <div class="lbl" style="margin-top:16px">Hvornår?</div>
+      <div class="row3" style="margin-top:5px">
+        <label class="fld"><span>Dag</span><input type="date" id="kDay" min="${isoDay(Date.now())}" max="${maxDay}" value="${isoDay(x.startsAt)}"></label>
+        <label class="fld"><span>Fra</span><input type="time" id="kFrom" step="300" value="${timeMissing ? '' : isoClock(x.startsAt)}"></label>
+        <label class="fld"><span>Til</span><input type="time" id="kTo" step="300" value="${timeMissing ? '' : isoClock(x.endsAt)}"></label>
+      </div>
+      ${mode === 'draft' && draft.date_seen === false ? '<p class="hint bad">Datoen står ikke på jeres side, så Kreds har måske gættet forkert. Tjek den, før I deler.</p>' : ''}
+      ${timeMissing ? '<p class="hint bad" id="kNoTime">Tidspunktet stod ikke på jeres side. Sæt det, før I deler.</p>' : ''}
+      ${guessEnd ? '<p class="hint">Sluttidspunktet stod ikke på siden, så det er sat til 2 timer.</p>' : ''}
+      <p class="hint" id="kWhen"></p>
+      <div class="lbl" style="margin-top:16px">Gentag</div>
+      <div style="margin-top:5px"><span class="seg" id="kRepeat">
+        <button type="button" data-r="once">Én gang</button><button type="button" data-r="week">Hver uge</button><button type="button" data-r="month">Hver måned</button>
+      </span></div>
+      <div class="often hidden" id="kOften"><span>Hvor ofte</span><select id="kEvery"></select></div>
+      <label class="fld"><span>Hvor?</span>
+        <input id="kWhere" maxlength="${MAX_WHERE}" placeholder="Adressen, hvor I mødes" value="${esc(where)}" autocomplete="off"></label>
+      <p class="hint" id="kWhereHint"></p>
+      <label class="fld"><span>Kategori</span><select id="kCategory">
+        ${CATEGORIES.map(([v, l]) => `<option value="${v}"${v === (x.category || '') ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+      <fieldset class="more"><legend>Mere information (valgfri)</legend>
+        <label class="fld"><span>Beskrivelse</span>
+          <textarea id="kMessage" maxlength="${MAX_MESSAGE}" placeholder="fx Vi har kaffe på kanden. Alle kan være med.">${esc(x.message)}</textarea>
+          <span class="count" id="kMessageCount"></span></label>
+        <div class="row2" style="margin-top:16px">
+          <label class="fld"><span>Pris</span><input id="kPrice" maxlength="${MAX_PRICE}" placeholder="fx 30 kr. på stedet" value="${esc(x.price)}"></label>
+          <label class="fld"><span>Plads til</span><input id="kCapacity" type="number" min="1" max="${MAX_CAPACITY}" placeholder="Ingen grænse" value="${esc(x.capacity)}"></label>
+        </div>
+        <label class="fld"><span>Link til billetter, tilmelding eller menu</span>
+          <input id="kLink" maxlength="300" placeholder="fx billetto.dk/jeres-aften" value="${esc(x.link)}"></label>
+        <div class="fld"><span>Billede</span><div class="photo" id="kPhoto"></div></div>
+      </fieldset>
+      <p class="problem" id="kProblem"></p>
+      <div class="foot"><button type="button" class="link" id="kCancel">Annuller</button>
+        <button type="submit" class="btn go big" id="kSave">${mode === 'edit' ? 'Gem' : 'Del'}</button></div>`;
+
+    $('kEvery').innerHTML = Array.from({ length: REPEAT_MAX }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('');
+    const sync = () => {
+      document.querySelectorAll('#kRepeat button').forEach((b) => b.setAttribute('aria-pressed', String(f.repeat ? b.dataset.r === f.unit : b.dataset.r === 'once')));
+      $('kOften').classList.toggle('hidden', !f.repeat);
+      $('kEvery').value = String(f.every);
+      [...$('kEvery').options].forEach((o) => (o.textContent = repeatText(Number(o.value), f.unit)));
+      check();
+    };
+    $('kRepeat').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; f.repeat = b.dataset.r !== 'once'; if (f.repeat) f.unit = b.dataset.r; sync(); };
+    $('kEvery').onchange = () => { f.every = Number($('kEvery').value); check(); };
+    $('kForm').oninput = check;
+    $('kFrom').addEventListener('change', () => { if (timeMissing && $('kFrom').value) { // a draft without a time: Til two hours after Fra
+      if (!$('kTo').value) $('kTo').value = isoClock(new Date(`2000-01-01T${$('kFrom').value}`).getTime() + 2 * HOUR);
+      $('kNoTime')?.remove(); timeMissing = false; check(); } });
+    $('kEarlier')?.addEventListener('change', () => { const r = rowsById[$('kEarlier').value]; if (r) openForm({ mode: 'copy', id: r.id }); });
+    $('kWhereHint').onclick = (e) => { if (e.target.closest('button')) { $('kWhere').value = place.address; check(); } };
+    $('kCancel').onclick = closeForm;
+    $('kForm').onsubmit = (e) => { e.preventDefault(); submit(); };
+    drawPhoto();
+    sync();
+    $('klarList').classList.add('hidden'); $('kForm').classList.remove('hidden');
+    tab('klar');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    $('kText').focus();
+  }
+  function closeForm() { f = null; $('kForm').classList.add('hidden'); $('kForm').innerHTML = ''; $('klarList').classList.remove('hidden'); }
+
+  function times() {
+    const day = $('kDay').value, from = $('kFrom').value, to = $('kTo').value;
+    if (!day || !from || !to) return null;
+    const startsAt = new Date(`${day}T${from}`).getTime();
+    let endsAt = new Date(`${day}T${to}`).getTime();
+    if (endsAt <= startsAt) endsAt += DAY; // Til before Fra: the next day
+    return { startsAt, endsAt };
+  }
+  function check() {
+    if (!f) return;
+    const t = times(), where = $('kWhere').value.trim();
+    let problem = '';
+    if (!t) problem = $('kFrom').value || $('kTo').value ? 'Vælg både fra og til.' : '';
+    else if (t.endsAt <= Date.now()) problem = 'Tidspunktet er allerede passeret.';
+    else if (t.endsAt - t.startsAt > DAY) problem = 'Højst 24 timer. Til-tidspunktet regnes som næste dag, hvis det ligger før fra.';
+    $('kWhen').className = 'hint' + (problem ? ' bad' : '');
+    $('kWhen').textContent = problem || (t ? (f.repeat
+      ? `${repeatText(f.every, f.unit)} · næste gang ${span(nextRepeat(t.startsAt, f.every, f.unit), nextRepeat(t.endsAt, f.every, f.unit))}`
+      : span(t.startsAt, t.endsAt).replace(/^./, (c) => c.toUpperCase())) : '');
+    $('kWhereHint').innerHTML = !place.address ? '' : where === place.address
+      ? 'Jeres adresse. Skriv en anden, hvis det er et andet sted.'
+      : `<button type="button" class="link">Brug jeres adresse (${esc(place.address)})</button>`;
+    $('kMessageCount').textContent = `${$('kMessage').value.length} / ${MAX_MESSAGE}`;
+    $('kSave').disabled = !$('kText').value.trim() || !where || !t || !!problem;
+  }
+
+  // The photo: a saved one (its path) or one just chosen (shrunk here, uploaded on Del).
+  function drawPhoto() {
+    const src = f.newPhoto ? URL.createObjectURL(f.newPhoto) : publicUrl(f.photoPath);
+    $('kPhoto').innerHTML = `${src ? `<img src="${src}" alt="">` : ''}
+      <label class="file btn">${src ? 'Skift billede' : 'Tilføj billede'}<input type="file" accept="image/*" id="kPhotoFile"></label>
+      ${src ? '<button type="button" class="link" id="kPhotoRemove">Fjern</button>' : ''}`;
+    $('kPhotoFile').onchange = async (e) => { const file = e.target.files[0]; if (!file) return; f.newPhoto = await shrink(file, 1600); drawPhoto(); };
+    if ($('kPhotoRemove')) $('kPhotoRemove').onclick = () => { f.newPhoto = null; f.photoPath = null; drawPhoto(); };
+  }
+
+  async function submit() {
+    if (!f || $('kSave').disabled) return;
+    const problem = (m) => { $('kProblem').textContent = m; $('kSave').disabled = false; };
+    $('kProblem').textContent = '';
+    const url = cleanLink($('kLink').value);
+    if (url === false) return problem('Linket ser ikke rigtigt ud. Prøv fx billetto.dk/jeres-aften.');
+    const capRaw = $('kCapacity').value.trim();
+    const capacity = capRaw === '' ? null : Math.round(Number(capRaw));
+    if (capacity !== null && !(capacity >= 1 && capacity <= MAX_CAPACITY)) return problem(`Plads til skal være mellem 1 og ${MAX_CAPACITY}.`);
+    $('kSave').disabled = true;
+    let photoPath = f.photoPath;
+    if (f.newPhoto) {
+      photoPath = await upload(f.newPhoto, 'klarpaa');
+      if (!photoPath) return problem('Billedet kom ikke op. Prøv igen.');
+      f.photoPath = photoPath; f.newPhoto = null;
+    }
+    const t = times(), where = $('kWhere').value.trim();
+    const row = {
+      text: $('kText').value.trim(), message: $('kMessage').value.trim() || null,
+      location: where === place.address ? null : where, // the address itself: stored on the place
+      price: $('kPrice').value.trim() || null, capacity, link: url ?? null, photo_path: photoPath || null, category: $('kCategory').value || null,
+      starts_at: new Date(t.startsAt).toISOString(), expires_at: new Date(t.endsAt).toISOString(),
+      repeat_weekly: f.repeat, repeat_every: f.repeat ? f.every : null, repeat_unit: f.repeat ? f.unit : null,
+    };
+    try {
+      if (f.mode === 'edit') {
+        const done = await rest(`place_klar_paa?id=eq.${f.id}`, { method: 'PATCH', body: row, headers: { Prefer: 'return=representation' } });
+        if (!done?.length) throw new Refused('ended', 400); // nothing changed: it ended meanwhile
+      } else {
+        await rest('place_klar_paa', { method: 'POST', body: { place_id: place.id, ...row }, headers: { Prefer: 'return=minimal' } });
+        if (f.draftId) { await rest(`place_drafts?id=eq.${f.draftId}`, { method: 'PATCH', body: { status: 'posted' } }).catch(() => {}); loadDrafts(); }
+      }
+    } catch (e) { return problem(why(e)); }
+    closeForm();
+    loadKlar();
+  }
+
+  // ---- Photos: shrunk in the browser to a JPEG, then uploaded to the place's own folder ----
+  function shrink(file, maxSide, square = false) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        let sx = 0, sy = 0, sw = img.naturalWidth, sh = img.naturalHeight;
+        if (square) { const side = Math.min(sw, sh); sx = (sw - side) / 2; sy = (sh - side) / 2; sw = sh = side; }
+        const scale = Math.min(1, maxSide / Math.max(sw, sh));
+        const c = document.createElement('canvas');
+        c.width = Math.round(sw * scale); c.height = Math.round(sh * scale);
+        c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(img.src);
+        c.toBlob((b) => resolve(b), 'image/jpeg', 0.7);
+      };
+      img.onerror = () => resolve(null);
+      img.src = URL.createObjectURL(file);
+    });
+  }
+  async function upload(blob, name) {
+    if (!blob) return null;
+    const path = `${place.id}/${name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`;
+    try { await api(`/storage/v1/object/${BUCKET}/${path}`, { method: 'POST', body: blob, raw: true, headers: { 'Content-Type': 'image/jpeg' } }); return path; }
+    catch { return null; }
+  }
+  const removeFiles = (paths) => paths.length && api(`/storage/v1/object/${BUCKET}`, { method: 'DELETE', body: { prefixes: paths } }).catch(() => {});
+
+  // ---- Drafts found on the place's own page (0054) ----
+  let drafts = [], notes = []; // notes: posted, but cancelled on the place's own page (0074)
+  async function loadDrafts() {
+    const id = place.id;
+    try {
+      // Cancelled on the place's own page (0074): never offered. One that is posted and still on in Kreds gets a note.
+      const cancelledPosted = await rest(`place_drafts?place_id=eq.${id}&status=eq.posted&cancelled_at=not.is.null&day=gte.${isoDay(Date.now())}&select=id,text,day,starts_at`).catch(() => []);
+      const live = cancelledPosted.length ? await rest(`place_klar_paa?place_id=eq.${id}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=id,text,starts_at`).catch(() => []) : [];
+      notes = cancelledPosted.flatMap((d) => {
+        const k = live.find((x) => x.text === d.text && d.starts_at && Date.parse(x.starts_at) === Date.parse(d.starts_at));
+        return k ? [{ ...d, klarId: k.id }] : [];
+      });
+      const rows = await rest(`place_drafts?place_id=eq.${id}&status=eq.new&cancelled_at=is.null&day=gte.${isoDay(Date.now())}&select=id,text,message,location,price,link,day,starts_at,ends_at,sold_out,weekly,date_seen,photo_path,category&order=day.asc,starts_at.asc.nullslast`);
+      if (place.id !== id) return;
+      const now = Date.now();
+      drafts = rows.filter((d) => !d.sold_out && (!d.starts_at || Date.parse(d.starts_at) > now));
+    } catch { drafts = []; notes = []; }
+    drawDrafts();
+  }
+  // A note first for each cancelled one still on in Kreds: "Aflys" does what Aflys on the Klar på tab does (those who
+  // are in hear it); "Det passer ikke" puts the note away.
+  function drawDrafts() {
+    const n = drafts.length + notes.length;
+    $('draftCount').textContent = n ? String(n) : '';
+    const noteHtml = notes.map((d) => {
+      const day = new Date(`${d.day}T12:00:00`);
+      return `<div class="item" data-id="${d.id}" data-k="${d.klarId}">
+        <div class="day"><small>${esc(weekday(day))}</small><b>${day.getDate()}</b><small>${esc(day.toLocaleDateString('da-DK', { month: 'short' }).replace('.', ''))}</small></div>
+        <div class="what"><b>${esc(d.text)}</b><div class="meta"><span class="danger">Jeres side siger, at det er aflyst.</span> Aflys det også i Kreds? Dem, der har sagt Jeg er med, får besked.</div></div>
+        <div class="acts"><button class="btn" data-do="notCancelled">Det passer ikke</button><button class="btn go" data-do="cancelToo">Aflys</button></div></div>`;
+    }).join('');
+    $('drafts').innerHTML = !n ? '<p class="empty">Intet nyt fra jeres side lige nu.</p>' : noteHtml + drafts.map((d) => {
+      const day = new Date(`${d.day}T12:00:00`);
+      const when = d.starts_at ? `kl. ${clock(Date.parse(d.starts_at))}${d.ends_at ? '–' + clock(Date.parse(d.ends_at)) : ''}` : '<span class="danger">tid mangler</span>';
+      const facts = [d.date_seen === false ? '<span class="danger">tjek datoen</span>' : '', when, d.weekly ? 'hver uge' : '', d.price ? esc(d.price) : '', d.location ? esc(d.location) : ''].filter(Boolean);
+      return `<div class="item" data-id="${d.id}">
+        <div class="day"><small>${esc(weekday(day))}</small><b>${day.getDate()}</b><small>${esc(day.toLocaleDateString('da-DK', { month: 'short' }).replace('.', ''))}</small></div>
+        <div class="what"><b>${esc(d.text)}</b><div class="meta">${facts.join(' · ')}${d.link ? ` · <a href="${esc(d.link)}" target="_blank" rel="noopener">Se eventet</a>` : ''}</div></div>
+        <div class="acts"><button class="btn" data-do="no">Nej</button><button class="btn go" data-do="post">Læg op</button></div></div>`;
+    }).join('');
+  }
+  $('drafts').onclick = async (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    const id = b.closest('.item')?.dataset.id, d = drafts.find((x) => x.id === id);
+    if (b.dataset.do === 'cancelToo' || b.dataset.do === 'notCancelled') {
+      const note = notes.find((x) => x.id === id); if (!note) return;
+      b.disabled = true;
+      try {
+        if (b.dataset.do === 'cancelToo') { await rest(`place_klar_paa?id=eq.${note.klarId}`, { method: 'DELETE' }); loadKlar(); }
+        await rest(`place_drafts?id=eq.${id}`, { method: 'PATCH', body: { status: 'dismissed' } });
+        notes = notes.filter((x) => x.id !== id); drawDrafts();
+      } catch (err) { b.disabled = false; b.closest('.item').querySelector('.meta').textContent = why(err); }
+      return;
+    }
+    if (!d) return;
+    if (b.dataset.do === 'post') openForm({ mode: 'draft', draft: d });
+    else if (b.dataset.do === 'no') { // gone at once, and the importer never brings it back
+      b.closest('.item').remove();
+      drafts = drafts.filter((x) => x.id !== id);
+      drawDrafts();
+      rest(`place_drafts?id=eq.${id}`, { method: 'PATCH', body: { status: 'dismissed' } }).catch(() => {});
+    }
+  };
+
+  // ---- Profile (0032, 0035, 0036) ----
+  const KINDS = { cafe: 'Café', bar: 'Bar', restaurant: 'Restaurant', club: 'Klub/forening', training: 'Træning', culture: 'Kultur', shop: 'Butik' };
+  const PHOTOS_MAX = 5;
+  const handle = (input) => { // as instagramHandle in src/data/places.tsx
+    const h = input.trim().replace(/^(https?:\/\/)?(www\.)?(instagram\.com\/)?@?/i, '').replace(/[/?#].*$/, '');
+    return /^[A-Za-z0-9._]{1,30}$/.test(h) ? h : undefined;
+  };
+  let pf = null;
+  function drawProfile() {
+    const p = place;
+    pf = { newLogo: null, newCover: null, photos: (p.photo_paths ?? []).map((path) => ({ path })) };
+    $('pForm').innerHTML = `
+      <h2>Profil</h2>
+      <p class="hint">Vises med det, I er klar på, på jeres side, og når nogen scanner jeres QR-kode.</p>
+      <div class="fld"><span>Logo</span><div class="photo" id="pLogo"></div></div>
+      <label class="fld"><span>Én linje om jer</span><input id="pTagline" maxlength="80" placeholder='fx "Surdej og kanelsnegle siden 1998"' value="${esc(p.tagline)}"></label>
+      <label class="fld"><span>Hjemmeside</span><input id="pWebsite" maxlength="200" placeholder="fx bageriet.dk" value="${esc((p.website ?? '').replace(/^https?:\/\//, ''))}"></label>
+      <label class="fld"><span>Instagram</span><input id="pInstagram" maxlength="200" placeholder="fx @bageriet" value="${esc(p.instagram ? '@' + p.instagram : '')}"></label>
+      <p class="hint bad hidden" id="pInstaBad">Det ligner ikke et Instagram-navn.</p>
+      <label class="fld"><span>Hvad slags sted</span><select id="pKind"><option value="">Vælg …</option>
+        ${Object.entries(KINDS).map(([k, v]) => `<option value="${k}"${p.kind === k ? ' selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label class="fld"><span>Et par linjer om jer</span><textarea id="pAbout" maxlength="400" placeholder='fx "Vi løber hver torsdag fra søerne, alle tempi."'>${esc(p.about)}</textarea>
+        <span class="count" id="pAboutCount"></span></label>
+      <div class="fld"><span>Stemningsbillede</span><div class="photo" id="pCover"></div></div>
+      <label class="fld"><span>Belønning til stamgæster</span><input id="pReward" maxlength="60" placeholder='fx "en gratis kaffe"' value="${esc(p.reward_text)}"></label>
+      <label class="fld"><span>For hvert</span><select id="pRewardEvery">
+        ${Array.from({ length: 19 }, (_, i) => i + 2).map((n) => `<option value="${n}"${(p.reward_every ?? 5) === n ? ' selected' : ''}>${n}. stempel</option>`).join('')}</select></label>
+      <p class="hint">Gæster får et stempel, hver gang de tjekker ind hos jer. Når de har nok, viser de belønningen ved disken og trykker selv Indløs. Lad feltet stå tomt, hvis I ikke vil give en. <span id="pRewardCount"></span></p>
+      <div class="fld"><span id="pPhotosLabel"></span><div class="thumbs" id="pPhotos"></div></div>
+      <p class="problem" id="pProblem"></p>
+      <div class="foot"><span class="ok" id="pOk"></span><button type="submit" class="btn go big" id="pSave">Gem</button></div>`;
+    const count = () => { $('pAboutCount').textContent = `${$('pAbout').value.length} / 400`; $('pOk').textContent = ''; };
+    $('pForm').oninput = count; count();
+    $('pForm').onsubmit = (e) => { e.preventDefault(); saveProfile(); };
+    drawProfilePhotos();
+    // How many were redeemed (0081): a number, never who.
+    rpc('place_reward_count', { p_place: p.id }).then((r) => {
+      const c = Array.isArray(r) ? r[0] : r;
+      if (c && Number(c.total) > 0) $('pRewardCount').textContent = `Indløst indtil nu: ${c.total} (${c.last30} de sidste 30 dage).`;
+    }).catch(() => {});
+  }
+  function drawProfilePhotos() {
+    const logo = pf.newLogo ? URL.createObjectURL(pf.newLogo) : publicUrl(place.logo_path);
+    $('pLogo').innerHTML = `${logo ? `<img class="logo" src="${logo}" alt="">` : ''}
+      <label class="file btn">${logo ? 'Skift logo' : 'Tilføj logo eller billede'}<input type="file" accept="image/*" id="pLogoFile"></label>`;
+    $('pLogoFile').onchange = async (e) => { const file = e.target.files[0]; if (file) { pf.newLogo = await shrink(file, 1200, true); drawProfilePhotos(); } };
+    const cover = pf.newCover ? URL.createObjectURL(pf.newCover) : publicUrl(place.cover_path);
+    $('pCover').innerHTML = `${cover ? `<img class="cover" src="${cover}" alt="">` : ''}
+      <label class="file btn">${cover ? 'Skift billede' : 'Tilføj et stemningsbillede'}<input type="file" accept="image/*" id="pCoverFile"></label>`;
+    $('pCoverFile').onchange = async (e) => { const file = e.target.files[0]; if (file) { pf.newCover = await shrink(file, 1600); drawProfilePhotos(); } };
+    $('pPhotosLabel').textContent = `Billeder (${pf.photos.length} af ${PHOTOS_MAX})`;
+    $('pPhotos').innerHTML = pf.photos.map((x, i) => `<div class="thumb"><img src="${x.blob ? URL.createObjectURL(x.blob) : publicUrl(x.path)}" alt="">
+        <button type="button" data-i="${i}" aria-label="Fjern billede">×</button></div>`).join('')
+      + (pf.photos.length < PHOTOS_MAX ? `<label class="file btn" style="align-self:center">Tilføj billeder<input type="file" accept="image/*" multiple id="pPhotoFiles"></label>` : '');
+    $('pPhotos').onclick = (e) => { const b = e.target.closest('button[data-i]'); if (b) { pf.photos.splice(Number(b.dataset.i), 1); drawProfilePhotos(); $('pOk').textContent = ''; } };
+    $('pPhotoFiles')?.addEventListener('change', async (e) => {
+      for (const file of [...e.target.files].slice(0, PHOTOS_MAX - pf.photos.length)) { const blob = await shrink(file, 1600); if (blob) pf.photos.push({ blob }); }
+      drawProfilePhotos(); $('pOk').textContent = '';
+    });
+  }
+  async function saveProfile() {
+    const p = place;
+    const fail = (m = 'Det lykkedes ikke. Prøv igen.') => { $('pProblem').textContent = m; $('pSave').disabled = false; };
+    $('pProblem').textContent = ''; $('pOk').textContent = '';
+    const igRaw = $('pInstagram').value.trim(), ig = handle(igRaw);
+    $('pInstaBad').classList.toggle('hidden', !igRaw || !!ig);
+    if (igRaw && !ig) return fail('Det ligner ikke et Instagram-navn.');
+    $('pSave').disabled = true;
+    let logo = p.logo_path ?? null, cover = p.cover_path ?? null;
+    if (pf.newLogo) { logo = await upload(pf.newLogo, 'logo'); if (!logo) return fail(); }
+    if (pf.newCover) { cover = await upload(pf.newCover, 'cover'); if (!cover) return fail(); }
+    const paths = [];
+    for (const x of pf.photos) { const path = x.path ?? await upload(x.blob, 'photo'); if (!path) return fail(); x.path = path; delete x.blob; paths.push(path); }
+    try {
+      await rpc('save_place_profile', { p_place: p.id, p_tagline: $('pTagline').value, p_website: $('pWebsite').value, p_logo_path: logo });
+      await rpc('save_place_about', { p_place: p.id, p_cover_path: cover, p_kind: $('pKind').value || null, p_about: $('pAbout').value, p_instagram: ig ?? null, p_photo_paths: paths });
+      await rpc('save_place_reward', { p_place: p.id, p_text: $('pReward').value, p_every: Number($('pRewardEvery').value) });
+    } catch (e) { return fail(why(e)); }
+    // Files no longer used: a replaced cover, removed photos. (Logos are kept, as in the app.)
+    removeFiles([...(p.photo_paths ?? []).filter((x) => !paths.includes(x)), ...(pf.newCover && p.cover_path ? [p.cover_path] : [])]);
+    const [fresh] = await rest(`places?id=eq.${p.id}&select=${COLS}`).catch(() => []);
+    if (fresh) { Object.assign(p, fresh); places = places.map((x) => (x.id === p.id ? p : x)); }
+    drawProfile();
+    $('pOk').textContent = 'Gemt';
+  }
+
+  // ---- Numbers (0021), as the app's Data tab was: counts only; breakdowns about people are null below 5 ----
+  const tile = (k, v, s = '') => `<div class="tile"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${s ? `<div class="s">${esc(s)}</div>` : ''}</div>`;
+  const WEEKS = 8, dash = '–';
+  const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : undefined);
+  const median = (xs) => { if (!xs.length) return undefined; const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
+  const spanText = (min) => { // "2 timer", "1 dag"
+    if (min === undefined) return dash;
+    if (min < 90) { const m = Math.max(1, Math.round(min)); return `${m} min`; }
+    if (min < 36 * 60) { const h = Math.round(min / 60); return h === 1 ? '1 time' : `${h} timer`; }
+    const d = Math.round(min / 1440); return d === 1 ? '1 dag' : `${d} dage`;
+  };
+  const weekStart = (back) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - back * 7); return d.getTime(); };
+  const isoWeek = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+    const first = new Date(d.getFullYear(), 0, 4); return 1 + Math.round(((d - first) / DAY - 3 + ((first.getDay() + 6) % 7)) / 7); };
+  function bars(host, title, weeks) {
+    const W = 640, H = 150, L = 4, B = 22, T = 18, max = Math.max(1, ...weeks.map((w) => w.value));
+    const bw = (W - L) / weeks.length;
+    $(host).innerHTML = `<h3>${esc(title)}</h3><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)}">${weeks.map((w, i) => {
+      const h = Math.round(((H - B - T) * w.value) / max), x = L + i * bw + bw * 0.18, y = H - B - h;
+      const last = i === weeks.length - 1;
+      return `<rect class="b" x="${x}" y="${y}" width="${bw * 0.64}" height="${Math.max(h, w.value ? 2 : 0)}" rx="3"></rect>
+        <text x="${x + bw * 0.32}" y="${y - 5}" text-anchor="middle">${w.value || ''}</text>
+        <text x="${x + bw * 0.32}" y="${H - 6}" text-anchor="middle">${last ? 'Denne uge' : 'Uge ' + isoWeek(w.start)}</text>`;
+    }).join('')}</svg>`;
+  }
+  let numbers = { fc: null, ins: null, weeks: [] };
+  async function loadNumbers() {
+    const id = place.id;
+    const one = (d) => (Array.isArray(d) ? d[0] : d);
+    const [fc, ins, weeks, mem] = await Promise.all([
+      rpc('place_follower_count', { p_place: id }).then(one).catch(() => null),
+      rpc('place_insights', { p_place: id }).then(one).catch(() => null),
+      rpc('place_follower_weeks', { p_place: id }).catch(() => []),
+      rest(`place_members?place_id=eq.${id}&user_id=eq.${load()?.user_id}&select=digest`).then(one).catch(() => null),
+    ]);
+    if (place.id !== id) return;
+    numbers = { fc, ins, weeks: weeks ?? [] };
+    $('nDigest').checked = !!mem?.digest;
+    $('nDigest').disabled = !mem;
+    drawNumbers();
+  }
+  $('nDigest').onchange = async () => {
+    const on = $('nDigest').checked;
+    try { await rpc('set_place_digest', { p_place: place.id, p_on: on }); } catch { $('nDigest').checked = !on; }
+  };
+  function drawNumbers() {
+    const { fc, ins, weeks } = numbers;
+    const n = (v) => (v === null || v === undefined ? undefined : Number(v));
+    const now = Date.now(), from = weekStart(WEEKS - 1);
+    const started = items.filter((k) => k.startsAt <= now && k.startsAt >= from), ended = started.filter((k) => k.endsAt <= now);
+    const sum = (list, f) => list.reduce((a, k) => a + f(k), 0);
+    const taken = sum(started, (k) => k.taken), endedTaken = sum(ended, (k) => k.taken), reach = sum(ended, (k) => k.reach);
+    const good = sum(items, (k) => k.good), better = sum(items, (k) => k.better);
+    const checked = ended.filter((k) => k.checkedIn > 0), came = sum(checked, (k) => k.checkedIn), cameOf = sum(checked, (k) => k.taken);
+    const via = sum(started, (k) => k.viaFriends), shares = sum(started, (k) => k.shares), sharedReach = sum(started, (k) => k.sharedReach);
+    const newGuests = n(ins?.new_guests), cameBack = n(ins?.came_back), regulars = n(ins?.regulars);
+
+    // The one number a place cares about first: new guests Kreds brought.
+    const extra = [cameOf ? `${pct(came, cameOf)} % kom` : null,
+      cameBack !== undefined && pct(cameBack, newGuests) !== undefined ? `${pct(cameBack, newGuests)} % kom igen` : null,
+      via > 0 ? `${via} via en ven` : null].filter(Boolean);
+    $('nHero').innerHTML = `<div class="k">Nye gæster fra Kreds</div><div class="v">${esc(newGuests ?? dash)}</div>
+      <div class="s">Sagde "Jeg er med" hos jer for første gang, de sidste 8 uger.</div>${extra.length ? `<div class="more">${esc(extra.join('  ·  '))}</div>` : ''}`;
+
+    const src = n(ins?.from_link) === undefined ? null : [['QR-koden eller et link', n(ins.from_link)], ['Jeres lokalområde i Kreds', n(ins.from_local)], ['Før vi målte det', n(ins.from_other)]].filter((x) => x[1] > 0);
+    $('nFollow').innerHTML = tile('Følgere', fc ? Number(fc.followers) : dash, fc && Number(fc.new_this_week) ? `${fc.new_this_week} ${Number(fc.new_this_week) === 1 ? 'ny' : 'nye'} denne uge` : '')
+      + (src ? src.map(([k, v]) => tile(k, v, `${pct(v, Number(ins.followers)) ?? 0} % af følgerne`)).join('') : tile('Hvor de kom fra', dash, 'Vises, når I har 5 følgere.'));
+    if (weeks.length) bars('nFollowChart', 'Nye følgere pr. uge', weeks.map((w) => { const [y, m, d] = w.week_start.split('-').map(Number); return { start: new Date(y, m - 1, d).getTime(), value: Number(w.new_followers) }; }));
+    $('nFollowChart').classList.toggle('hidden', !weeks.length);
+
+    const perPost = ended.length ? String(Math.round((endedTaken / ended.length) * 10) / 10).replace('.', ',') : dash;
+    $('nKlar').innerHTML = tile('Jeg er med', taken, 'de sidste 8 uger')
+      + tile('Sagde ja', pct(endedTaken, reach) === undefined ? dash : `${pct(endedTaken, reach)} %`, 'af de følgere, der fik besked')
+      + tile('Pr. gang', perPost, started.length === 1 ? 'delt 1 gang' : `delt ${started.length} gange`)
+      + tile('Kom', cameOf ? `${pct(came, cameOf)} %` : dash, cameOf ? `${came} af ${cameOf} tjekket ind` : 'Når gæster tjekker ind')
+      + tile('Godt', good + better ? `${pct(good, good + better)} %` : dash, good + better ? `af ${good + better} svar` : 'ingen svar endnu');
+    bars('nInChart', 'Jeg er med pr. uge', Array.from({ length: WEEKS }, (_, i) => { const start = weekStart(WEEKS - 1 - i);
+      return { start, value: sum(started.filter((k) => k.startsAt >= start && k.startsAt < start + 7 * DAY), (k) => k.taken) }; }));
+
+    $('nRipples').textContent = shares > 0 ? `${shares} tog nogen med. Det nåede ${sharedReach} af deres venner, og ${via} kom med via dem.` : 'Ingen har taget nogen med endnu.';
+
+    const filled = ended.filter((k) => k.fullAfter !== undefined), withSpots = ended.filter((k) => k.capacity).length;
+    $('nTiming').innerHTML = tile('Før start', spanText(median(ended.flatMap((k) => (k.lead === undefined ? [] : [k.lead])))), 'siger de fleste ja')
+      + tile('Fuldt på', spanText(median(filled.map((k) => k.fullAfter))), withSpots ? `${filled.length} af ${withSpots} med pladser blev fulde` : 'ingen med et antal pladser');
+    // The best weekday and hour: most "Jeg er med" on average (from 3 ended up).
+    let best = '';
+    if (ended.length >= 3) {
+      const slots = new Map();
+      for (const k of ended) { const at = new Date(k.startsAt), key = `${at.getDay()}-${at.getHours()}`, s = slots.get(key) ?? { sum: 0, n: 0, at: k.startsAt }; slots.set(key, { sum: s.sum + k.taken, n: s.n + 1, at: s.at }); }
+      const [top] = [...slots.values()].sort((a, b) => b.sum / b.n - a.sum / a.n);
+      if (top && top.sum > 0) { const at = new Date(top.at), day = at.toLocaleDateString('da-DK', { weekday: 'long' }); best = `${day.charAt(0).toUpperCase() + day.slice(1)} kl. ${at.getHours()} virker bedst.`; }
+    }
+    $('nBest').textContent = best;
+
+    const returning = pct(sum(ended, (k) => k.returning), endedTaken);
+    $('nGuests').innerHTML = tile('Kom igen', cameBack === undefined || pct(cameBack, newGuests) === undefined ? dash : `${pct(cameBack, newGuests)} %`, cameBack === undefined ? 'vises fra 5 gæster' : 'af de nye')
+      + tile('Stamgæster', regulars ?? dash, regulars === undefined ? 'vises fra 5 gæster' : 'har været med 3 gange eller mere')
+      + tile('Kommer igen', returning === undefined ? dash : `${returning} %`, 'har sagt ja her før');
+  }
+
+  start();
+  </script>
+</body>
+</html>

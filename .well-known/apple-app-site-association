@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["VJ6C2XQ3A4.com.holm325.kreds"],
+        "components": [
+          { "/": "/forbind/*", "comment": "An invitation from a friend" },
+          { "/": "/sted/*", "comment": "A place's QR code at the counter" },
+          { "/": "/event/*", "comment": "A shared event" }
+        ]
+      }
+    ]
+  }
+}
